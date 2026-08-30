@@ -23,8 +23,10 @@ for automatic deletion. Experimental `flat-directory` and `style-drift`
 findings are likewise non-mutating.
 
 When supplied, `metrics.style_baseline_commit` is the resolved commit used for
-historical style peers. `metrics.experimental_analysis` records whether
-structure/style were added to a `scan` or `diff` run.
+historical style peers. `metrics.style_baseline_mode` is `repository-peers` or
+`pre-ai-git` and remains available even when style produces no findings.
+`metrics.experimental_analysis` records whether structure/style were added to
+a `scan` or `diff` run.
 
 Finding IDs are derived from the rule, normalized path, replacement, and evidence fingerprint. Do not assume IDs survive a schema-version change.
 

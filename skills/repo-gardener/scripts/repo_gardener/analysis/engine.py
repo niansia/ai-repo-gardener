@@ -97,6 +97,10 @@ class Analyzer:
             metrics["changed_files"] = len(changed)
         if baseline_commit:
             metrics["style_baseline_commit"] = baseline_commit
+        if "style" in modes:
+            metrics["style_baseline_mode"] = (
+                "pre-ai-git" if baseline_commit else "repository-peers"
+            )
         return Report(
             command=command,
             root=self.root,

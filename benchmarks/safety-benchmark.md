@@ -1,10 +1,9 @@
 # Adversarial safety benchmark
 
-Run on 2026-08-30 with Python 3.12 on Windows. The full regression suite passed
-49 tests; one real-symlink check was skipped because this Windows account could
-not create symlinks. The implementation branch is also exercised by Linux CI.
-This table isolates eight cases where a normal import graph can make live or
-user-modified code look unused.
+Run on 2026-08-30 with Python 3.12. The suite passes 49 tests on Windows, where
+one real-symlink test is skipped when the account cannot create symlinks, and
+all 50 tests on Linux. This table isolates eight cases where a normal import
+graph can make live or user-modified code look unused.
 
 | Scenario | Required outcome | Result |
 | --- | --- | --- |

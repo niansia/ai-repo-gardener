@@ -119,7 +119,9 @@ Copy [`repo-gardener.toml.example`](repo-gardener.toml.example) to
 validation commands, and analysis thresholds. `src/` modules remain protected
 from automatic deletion by default. Any module inside an importable package is
 also treated as a possible external API. A repository owner must explicitly set
-both relevant safety overrides after confirming the package is not public.
+both relevant safety overrides, `allow_delete_src = true` and
+`allow_delete_package_modules = true`, after confirming the package is not
+public.
 
 Validation commands read from the target repository are untrusted and ignored
 by default. Prefer explicit `--validate` arguments. `--trust-repo-config` is an

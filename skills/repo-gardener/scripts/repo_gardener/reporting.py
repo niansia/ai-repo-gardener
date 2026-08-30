@@ -40,6 +40,14 @@ def render_pretty(report: Report, confidence: str) -> str:
     lines.append("")
     if not data["findings"]:
         lines.append("No findings at the selected confidence level.")
+        if (
+            report.command == "style"
+            and data["metrics"].get("style_baseline_mode") == "repository-peers"
+        ):
+            lines.append(
+                "Tip: If this repository is mostly AI-generated, use "
+                "--baseline <pre-AI ref> for a historical house-style baseline."
+            )
         return "\n".join(lines)
     for item in data["findings"]:
         tier = _tier(float(item["confidence"]))

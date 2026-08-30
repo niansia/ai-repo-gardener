@@ -8,6 +8,7 @@ import pytest
 from conftest import write_project
 from repo_gardener.analysis import Analyzer
 from repo_gardener.git_support import git_executable
+from repo_gardener.reporting import render_pretty
 
 
 def test_flat_directory_reports_import_affinity_clusters(tmp_path: Path) -> None:
@@ -285,7 +286,10 @@ def work(number):
     with_baseline = Analyzer(tmp_path).report("style", style_baseline="HEAD~1")
 
     assert not without_baseline.findings
+    assert without_baseline.metrics["style_baseline_mode"] == "repository-peers"
+    assert "--baseline <pre-AI ref>" in render_pretty(without_baseline, "all")
     assert with_baseline.findings
+    assert with_baseline.metrics["style_baseline_mode"] == "pre-ai-git"
     assert with_baseline.metrics["style_baseline_commit"]
     assert any(
         item["type"] == "baseline_mode" and item["value"] == "pre-ai-git"

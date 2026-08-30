@@ -13,8 +13,18 @@ MUTED = "#7e8da6"
 GREEN = "#65d6a6"
 YELLOW = "#f2c66d"
 BLUE = "#7db7ff"
-FONT_PATH = Path("C:/Windows/Fonts/consola.ttf")
-BOLD_FONT_PATH = Path("C:/Windows/Fonts/consolab.ttf")
+FONT_CANDIDATES = (
+    Path("C:/Windows/Fonts/consola.ttf"),
+    Path("/System/Library/Fonts/Menlo.ttc"),
+    Path("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"),
+    Path("/usr/share/fonts/truetype/liberation2/LiberationMono-Regular.ttf"),
+)
+BOLD_FONT_CANDIDATES = (
+    Path("C:/Windows/Fonts/consolab.ttf"),
+    Path("/System/Library/Fonts/Menlo.ttc"),
+    Path("/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf"),
+    Path("/usr/share/fonts/truetype/liberation2/LiberationMono-Bold.ttf"),
+)
 
 FRAMES = [
     [
@@ -63,14 +73,29 @@ def render_frame(lines: list[tuple[str, str]]) -> Image.Image:
     draw.ellipse((76, 70, 92, 86), fill="#ff6b6b")
     draw.ellipse((102, 70, 118, 86), fill="#ffd166")
     draw.ellipse((128, 70, 144, 86), fill="#65d6a6")
-    title_font = ImageFont.truetype(str(BOLD_FONT_PATH), 24)
-    body_font = ImageFont.truetype(str(FONT_PATH), 23)
+    title_font = _load_font(24, bold=True)
+    body_font = _load_font(23)
     draw.text((WIDTH - 260, 62), "repo-gardener", font=title_font, fill=MUTED)
     y = 124
     for line, color in lines:
         draw.text((78, y), line, font=body_font, fill=color)
         y += 43
     return image
+
+
+def _load_font(size: int, bold: bool = False) -> ImageFont.ImageFont:
+    candidates = BOLD_FONT_CANDIDATES if bold else FONT_CANDIDATES
+    for path in candidates:
+        if not path.is_file():
+            continue
+        try:
+            return ImageFont.truetype(str(path), size)
+        except OSError:
+            continue
+    try:
+        return ImageFont.load_default(size=size)
+    except TypeError:  # Pillow versions before the scalable default font.
+        return ImageFont.load_default()
 
 
 def main() -> None:

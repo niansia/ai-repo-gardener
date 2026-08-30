@@ -2,6 +2,9 @@
 
 Run on 2026-08-30 with the v0.1 working tree on Windows. Timings are local
 wall-clock measurements and are not a cross-machine performance guarantee.
+A reviewer-reported Linux run measured the same 1,519-file pandas scan at
+18.1 seconds, illustrating that these local timings should not be compared as
+cross-platform performance guarantees.
 
 Command: `repo-gardener scan <repo> --confidence all`
 
