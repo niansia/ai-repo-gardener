@@ -1,14 +1,19 @@
 # Adversarial safety benchmark
 
-Run on 2026-08-31 with Python 3.12. The suite passes 60 tests on Windows, where
+Run on 2026-08-31 with Python 3.12. The suite passes 69 tests on Windows, where
 one real-symlink test is skipped when the account cannot create symlinks, and
-all 61 tests on Linux. This table isolates fourteen cases where a normal import
+all 70 tests on Linux. This table isolates nineteen cases where a normal import
 graph can make live or user-modified code look unused.
 
 | Scenario | Required outcome | Result |
 | --- | --- | --- |
 | `import_module` imported directly, imported with an alias, or assigned through two aliases | Keep live module | Pass |
 | Non-literal `importlib.import_module(name)` | Disable automatic deletion repo-wide | Pass |
+| Repository Python parse error | Keep findings but disable automatic deletion repo-wide | Pass |
+| `eval` or `exec` runtime execution | Disable automatic deletion repo-wide | Pass |
+| `getattr(importlib, "import_module")` reflection | Disable automatic deletion repo-wide | Pass |
+| `builtins.__import__`, including assigned/imported aliases | Disable automatic deletion repo-wide | Pass |
+| `pkgutil.iter_modules` or `walk_packages` discovery | Disable automatic deletion repo-wide | Pass |
 | `[project.entry-points.*]` plugin | Keep registered module | Pass |
 | `setup.cfg` plugin entry point | Keep registered module | Pass |
 | Literal `setup.py` plugin entry point, including assigned setup aliases | Keep registered module | Pass |
@@ -22,11 +27,12 @@ graph can make live or user-modified code look unused.
 | Monkeypatch string module path | Keep referenced module | Pass |
 | Framework-discovered FastAPI/Flask/Click/Typer entrypoint | Keep reachable modules | Pass |
 
-Eligible-deletion false positives in these adversarial cases: **0 / 14**.
+Eligible-deletion false positives in these adversarial cases: **0 / 19**.
 
 Transactional gates also verify that `--apply` refuses to run without a reviewed
 plan and rejects a repository whose current operation set has grown since the
-plan was reviewed.
+plan was reviewed. Candidate, replacement, and call-site evidence hashes are
+rechecked at the final mutation boundary.
 
 This is a release-gate fixture count, not an estimate of precision on all
 Python repositories. Reproduce it with:

@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+from hashlib import sha256
 from pathlib import Path
 
 import pytest
@@ -114,6 +115,72 @@ def test_apply_rejects_a_stale_content_hash(tmp_path: Path) -> None:
         apply_deletions(tmp_path, [finding], ["ignored"])
 
     assert (tmp_path / "parser_old.py").is_file()
+
+
+def test_apply_rechecks_call_site_evidence_immediately_before_delete(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    write_project(
+        tmp_path,
+        {
+            "app.py": "import parser",
+            "parser.py": "def parse(value):\n    return value.strip()",
+            "parser_old.py": "def parse(value):\n    return value.strip()",
+        },
+    )
+    candidate = tmp_path / "parser_old.py"
+    replacement = tmp_path / "parser.py"
+    call_site = tmp_path / "app.py"
+    finding = Finding(
+        rule="stale-file",
+        category="repo-gc",
+        severity="warning",
+        confidence=1.0,
+        risk=0.0,
+        path="parser_old.py",
+        replacement="parser.py",
+        recommendation="safe_delete_candidate",
+        evidence=[
+            {
+                "type": "candidate_sha256",
+                "value": sha256(candidate.read_bytes()).hexdigest(),
+            },
+            {
+                "type": "replacement_sha256",
+                "value": sha256(replacement.read_bytes()).hexdigest(),
+            },
+        ],
+    ).finalize()
+    reviewed_plan: dict[str, object] = {
+        "operations": [
+            {
+                "evidence_files": [
+                    {
+                        "path": "app.py",
+                        "sha256": sha256(call_site.read_bytes()).hexdigest(),
+                    }
+                ]
+            }
+        ]
+    }
+    original_copy = fixes_module.shutil.copy2
+
+    def mutate_after_snapshot(source: Path, destination: Path) -> None:
+        original_copy(source, destination)
+        if Path(source).resolve() == candidate.resolve():
+            call_site.write_text("import parser_old\n", encoding="utf-8")
+
+    monkeypatch.setattr(fixes_module.shutil, "copy2", mutate_after_snapshot)
+
+    with pytest.raises(FixError, match="evidence file changed since review"):
+        apply_deletions(
+            tmp_path,
+            [finding],
+            ["ignored"],
+            reviewed_plan,
+        )
+
+    assert candidate.is_file()
 
 
 def test_apply_rejects_path_escape(tmp_path: Path) -> None:
@@ -289,7 +356,9 @@ def test_fix_uses_the_same_git_base_as_diff(tmp_path: Path, capsys) -> None:
     )
     payload = json.loads(capsys.readouterr().out)
     assert exit_code == 0
+    assert payload["schema_version"] == 2
     assert payload["plan_id"]
+    assert payload["automatic_deletion_blockers"] == []
     assert payload["operations"][0]["candidate_sha256"]
     assert payload["base_ref"] == "HEAD~1"
     assert payload["base_sha"]

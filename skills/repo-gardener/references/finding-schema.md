@@ -30,9 +30,11 @@ a `scan` or `diff` run.
 
 Finding IDs are derived from the rule, normalized path, replacement, and evidence fingerprint. Do not assume IDs survive a schema-version change.
 
-`fix --dry-run --format json` emits a deterministic reviewed-plan contract. It
-contains `plan_id`, `base_ref`, `base_sha`, `head_sha`, `config_sha256`, and
-deletion operations with candidate, replacement, and call-site evidence hashes.
+`fix --dry-run --format json` emits reviewed-plan schema version `2`. It
+contains `plan_id`, `base_ref`, `base_sha`, `head_sha`, `config_sha256`,
+automatic-deletion blockers, and deletion operations with candidate,
+replacement, and call-site evidence hashes.
 `fix --apply --plan <json>` re-analyzes the repository and requires the current
-plan ID to match exactly before deletion. The plan is a machine-readable
-preview, not permission to mutate the repository.
+plan ID to match exactly before deletion. Candidate, replacement, and call-site
+evidence hashes are checked again at the final mutation boundary. The plan is a
+machine-readable preview, not permission to mutate the repository.

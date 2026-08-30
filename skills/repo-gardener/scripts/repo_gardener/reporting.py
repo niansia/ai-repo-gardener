@@ -68,11 +68,18 @@ def render_pretty(report: Report, confidence: str) -> str:
 
 
 def render_fix_plan(
-    findings: list[Finding], root: str, apply: bool, plan_id: str
+    findings: list[Finding],
+    root: str,
+    apply: bool,
+    plan_id: str,
+    blockers: list[str],
 ) -> str:
     lines = ["Repo Gardener safe deletion plan", "=" * 72, f"Root: {root}"]
     lines.append(f"Plan ID: {plan_id}")
     lines.append("Rollback data: .repo-gardener/ (keep this path in .gitignore)")
+    if blockers:
+        lines.append("Automatic deletion disabled:")
+        lines.extend(f"- {blocker}" for blocker in blockers)
     if not findings:
         lines.append("No high-confidence, low-risk deletion candidates.")
         return "\n".join(lines)

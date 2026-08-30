@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -8,6 +9,7 @@ import pytest
 from conftest import write_project
 from repo_gardener.analysis import Analyzer
 from repo_gardener.analysis import stale as stale_module
+from repo_gardener.cli import main
 from repo_gardener.fixes import safe_candidates
 from repo_gardener.git_support import (
     changed_paths,
@@ -132,6 +134,68 @@ def test_runpy_and_module_shaped_registry_strings_keep_modules_live(
     assert any("module_shaped_string" in risk for risk in registry_finding.risks)
 
 
+@pytest.mark.parametrize(
+    "loader_source",
+    [
+        "old = eval(\"__import__('plugin_old')\")",
+        "exec(\"__import__('plugin_old')\")",
+        (
+            "import importlib\n\ndef load(name):\n"
+            "    return getattr(importlib, 'import_module')(name)"
+        ),
+        (
+            "import builtins\nloader = builtins.__import__\n\n"
+            "def load(name):\n    return loader(name)"
+        ),
+        (
+            "from builtins import __import__ as load\n\n"
+            "def discover(name):\n    return load(name)"
+        ),
+        "import pkgutil\nPLUGINS = list(pkgutil.iter_modules())",
+        "from pkgutil import walk_packages as scan\nPLUGINS = list(scan())",
+    ],
+)
+def test_opaque_runtime_discovery_disables_safe_deletion(
+    tmp_path: Path, loader_source: str
+) -> None:
+    executable = git_executable()
+    if executable is None:
+        pytest.skip("git is unavailable")
+    write_project(
+        tmp_path,
+        {
+            "app.py": "import plugin_old\n\nif __name__ == '__main__':\n    pass",
+            "loader.py": loader_source,
+            "plugin_old.py": "def run():\n    return True",
+        },
+    )
+    _git(executable, tmp_path, "init")
+    _git(executable, tmp_path, "config", "user.email", "tests@example.com")
+    _git(executable, tmp_path, "config", "user.name", "Repo Gardener Tests")
+    _git(executable, tmp_path, "add", ".")
+    _git(executable, tmp_path, "commit", "-m", "old plugin")
+    write_project(
+        tmp_path,
+        {
+            "app.py": "import plugin\n\nif __name__ == '__main__':\n    pass",
+            "plugin.py": "def run():\n    return True",
+        },
+    )
+    _git(executable, tmp_path, "add", ".")
+    _git(executable, tmp_path, "commit", "-m", "replace plugin")
+
+    finding = next(
+        item
+        for item in Analyzer(tmp_path).report("diff", "HEAD~1").findings
+        if item.path == "plugin_old.py"
+    )
+
+    assert finding.confidence >= 0.85
+    assert finding.risk == 1.0
+    assert finding.recommendation == "review"
+    assert any("opaque_dynamic_module_discovery" in risk for risk in finding.risks)
+
+
 def test_nonliteral_dynamic_discovery_disables_safe_deletion(tmp_path: Path) -> None:
     executable = git_executable()
     if executable is None:
@@ -168,6 +232,69 @@ def test_nonliteral_dynamic_discovery_disables_safe_deletion(tmp_path: Path) -> 
     assert finding.risk == 1.0
     assert finding.recommendation == "review"
     assert any("opaque_dynamic_module_discovery" in risk for risk in finding.risks)
+
+
+def test_repository_parse_error_disables_safe_deletion(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    executable = git_executable()
+    if executable is None:
+        pytest.skip("git is unavailable")
+    write_project(
+        tmp_path,
+        {
+            "app.py": "import parser_old\n\nif __name__ == '__main__':\n    pass",
+            "broken.py": "import parser_old\nthis is not valid python !!!",
+            "parser_old.py": "def parse(value):\n    return value.strip()",
+        },
+    )
+    _git(executable, tmp_path, "init")
+    _git(executable, tmp_path, "config", "user.email", "tests@example.com")
+    _git(executable, tmp_path, "config", "user.name", "Repo Gardener Tests")
+    _git(executable, tmp_path, "add", ".")
+    _git(executable, tmp_path, "commit", "-m", "old parser")
+    write_project(
+        tmp_path,
+        {
+            "app.py": "import parser\n\nif __name__ == '__main__':\n    pass",
+            "parser.py": "def parse(value):\n    return value.strip()",
+        },
+    )
+    _git(executable, tmp_path, "add", ".")
+    _git(executable, tmp_path, "commit", "-m", "replace parser")
+
+    report = Analyzer(tmp_path).report("diff", "HEAD~1")
+    finding = next(item for item in report.findings if item.path == "parser_old.py")
+
+    assert report.metrics["parse_errors"] == 1
+    assert finding.confidence >= 0.85
+    assert finding.risk == 1.0
+    assert finding.recommendation == "review"
+    assert any("repository_parse_errors" in risk for risk in finding.risks)
+    assert safe_candidates(report.findings) == []
+    assert main(["fix", str(tmp_path), "--base", "HEAD~1", "--dry-run"]) == 0
+    assert "1 Python file(s) could not be parsed" in capsys.readouterr().out
+    assert (
+        main(
+            [
+                "fix",
+                str(tmp_path),
+                "--base",
+                "HEAD~1",
+                "--dry-run",
+                "--format",
+                "json",
+            ]
+        )
+        == 0
+    )
+    plan = json.loads(capsys.readouterr().out)
+    assert plan["schema_version"] == 2
+    assert plan["operations"] == []
+    assert any(
+        "could not be parsed" in blocker
+        for blocker in plan["automatic_deletion_blockers"]
+    )
 
 
 def test_packaging_plugin_entrypoint_is_a_graph_root(tmp_path: Path) -> None:

@@ -101,7 +101,7 @@ def _orphan_finding(
     ):
         return None
     risk, risks = _risk(candidate, records, config)
-    confidence = max(0.35, 0.68 - risk * 0.25)
+    confidence = 0.68
     return Finding(
         rule="orphan-file",
         category="repo-gc",
@@ -167,7 +167,6 @@ def _build_finding(
         git_sequence,
         inbound,
         naming,
-        risk,
     )
     evidence = _evidence(
         graph,
@@ -285,6 +284,17 @@ def _risk(
 ) -> tuple[float, list[str]]:
     risk = 0.0
     risks: list[str] = []
+    parse_error_paths = sorted(
+        item.relative_path for item in records if item.parse_error is not None
+    )
+    if parse_error_paths:
+        risk = 1.0
+        risks.append(
+            "repository_parse_errors:"
+            + str(len(parse_error_paths))
+            + ":"
+            + ",".join(parse_error_paths[:3])
+        )
     if config.is_protected(record.relative_path):
         risk = 1.0
         risks.append("protected_path")
@@ -400,7 +410,6 @@ def _confidence(
     git_sequence: bool,
     inbound: int,
     naming: bool,
-    risk: float,
 ) -> float:
     points = 25.0
     points += (
@@ -415,7 +424,6 @@ def _confidence(
     points += 10.0 * similarity.symbols
     points += 10.0 if inbound == 0 else 0.0
     points += 5.0 if naming else 0.0
-    points -= risk * 35.0
     confidence = max(0.0, min(1.0, points / 100.0))
     return confidence if git_sequence else min(confidence, 0.84)
 

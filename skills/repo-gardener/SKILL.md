@@ -24,7 +24,9 @@ Use deterministic findings as the ground truth for repository cleanup. Treat nam
 
 3. Prioritize `stale-file` findings with a replacement, multiple independent
    evidence items, high confidence, and low risk. Treat every `orphan-file` as
-   review-only.
+   review-only. If any finding reports `repository_parse_errors` or
+   `opaque_dynamic_module_discovery`, explain that automatic deletion is
+   disabled until the uncertainty is resolved.
 4. Inspect medium-confidence or partial replacements semantically. A matching
    filename alone is insufficient.
 5. Write the safe-deletion preview to a reviewable JSON plan with the same base
@@ -48,7 +50,7 @@ these experimental analyzers into the default cleanup report.
 
 ## Mutation boundary
 
-Analysis is read-only. Before any deletion, read [references/safety-policy.md](references/safety-policy.md). Never run the experimental `fix --apply` unless the user asked for repository changes and the exact JSON plan has been reviewed; always pass that file through `--plan`. Never pass `--trust-repo-config` unless the user explicitly authorizes execution of repository-controlled commands. High confidence means eligible for review, not permission to delete.
+Analysis is read-only. Before any deletion, read [references/safety-policy.md](references/safety-policy.md). Never run the experimental `fix --apply` unless the user asked for repository changes and the exact JSON plan has been reviewed; always pass that file through `--plan`. Review repository-provided safety overrides because they affect eligibility even without `--trust-repo-config`. Never pass `--trust-repo-config` unless the user explicitly authorizes execution of repository-controlled commands. High confidence means eligible for review, not permission to delete.
 
 ## Commands
 

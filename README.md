@@ -3,7 +3,7 @@
 **Find files the AI forgot to delete.**
 
 Repo Gardener is a deterministic garbage collector for AI-edited Python
-repositories. Version `0.1.0a1` focuses on one job: finding superseded iteration files
+repositories. Version `0.1.0a2` focuses on one job: finding superseded iteration files
 and newly-created orphan files without turning weak guesses into deletions.
 
 ![Repo Gardener diff and safe dry-run demo](docs/demo.gif)
@@ -129,18 +129,39 @@ migrations, plugin paths, package APIs, dynamic references, partial
 replacements, orphan findings, structure findings, and style findings are never
 automatic deletion candidates.
 
-PEP 420 namespace packages declared through setuptools are treated as possible
-external APIs. Literal module-shaped strings conservatively block automatic
-deletion only when they resolve to a module that exists in the repository.
+Any Python parse error disables automatic deletion across the repository while
+still allowing review findings. The same veto applies to opaque runtime loading,
+including `eval`/`exec`, reflected import callables, non-literal imports, and
+`pkgutil` module discovery. Literal module-shaped strings raise risk only when
+they resolve to a module that exists in the repository.
+
+### What the default package protection means
+
+By default, only files at the repository root can pass the automatic-deletion
+risk gate. Every Python file inside a subdirectory is review-only, including an
+implicit namespace package without `__init__.py`.
+
+| Layout | Default result for an otherwise strong stale-file finding |
+| --- | --- |
+| `parser_old.py` at repository root | Eligible for `safe_delete_candidate` |
+| `app/parser_old.py` without `app/__init__.py` | Review: possible implicit namespace API |
+| `app/parser_old.py` with `app/__init__.py` | Review: possible package API |
+| `src/pkg/parser_old.py` | Review: package and `src/` protection |
+
+To make reviewed application-internal package files eligible, the repository
+owner must explicitly opt out of both protections:
+
+```toml
+[safety]
+allow_delete_src = true
+allow_delete_package_modules = true
+```
 
 Copy [`repo-gardener.toml.example`](repo-gardener.toml.example) to
 `repo-gardener.toml` to declare entrypoints, protected paths, exclusions,
-validation commands, and analysis thresholds. `src/` modules remain protected
-from automatic deletion by default. Any module inside an importable package is
-also treated as a possible external API. A repository owner must explicitly set
-both relevant safety overrides, `allow_delete_src = true` and
-`allow_delete_package_modules = true`, after confirming the package is not
-public.
+validation commands, and analysis thresholds. Only enable these safety
+overrides after confirming that the package is application-internal rather than
+a public or plugin-facing API.
 
 Validation commands read from the target repository are untrusted and ignored
 by default. Prefer explicit `--validate` arguments. `--trust-repo-config` is an
@@ -172,6 +193,11 @@ not a labeled precision benchmark. The separate adversarial safety gate is
 recorded in [`benchmarks/safety-benchmark.md`](benchmarks/safety-benchmark.md);
 it reports eligible-deletion false positives rather than claiming population
 precision.
+
+Alpha validation commands do not yet have a built-in timeout. Repository safety
+overrides are also honored during analysis without `--trust-repo-config` (that
+flag controls validation-command execution only), so review the repository
+config before authorizing apply. The plan pins its effective configuration hash.
 
 For CI, `--fail-on high`, `--fail-on medium`, and `--fail-on any` use exit codes
 `1` for a reached finding threshold and `2` for tool/configuration errors.

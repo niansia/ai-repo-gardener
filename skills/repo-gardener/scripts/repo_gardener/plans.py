@@ -11,7 +11,7 @@ from .fixes import FixError
 from .git_support import resolve_git_ref
 from .models import Finding
 
-PLAN_SCHEMA_VERSION = 1
+PLAN_SCHEMA_VERSION = 2
 MAX_PLAN_BYTES = 2 * 1024 * 1024
 
 
@@ -21,6 +21,7 @@ def build_plan(
     base_ref: str,
     config: Config,
     apply: bool = False,
+    blockers: list[str] | None = None,
 ) -> dict[str, Any]:
     base_sha = resolve_git_ref(root, base_ref)
     head_sha = resolve_git_ref(root, "HEAD")
@@ -38,6 +39,7 @@ def build_plan(
         "head_sha": head_sha,
         "config_sha256": _config_hash(config),
         "validation_required": True,
+        "automatic_deletion_blockers": sorted(blockers or []),
         "operations": operations,
     }
     plan["plan_id"] = _plan_id(plan)
@@ -108,6 +110,7 @@ def _validate_plan(plan: dict[str, Any]) -> None:
         "head_sha",
         "config_sha256",
         "validation_required",
+        "automatic_deletion_blockers",
         "operations",
         "plan_id",
     }
@@ -122,6 +125,10 @@ def _validate_plan(plan: dict[str, Any]) -> None:
         raise FixError("reviewed plan has inconsistent base fields")
     if plan["validation_required"] is not True:
         raise FixError("reviewed plan must require validation")
+    if not isinstance(plan["automatic_deletion_blockers"], list) or not all(
+        isinstance(item, str) and item for item in plan["automatic_deletion_blockers"]
+    ):
+        raise FixError("reviewed plan contains invalid automatic deletion blockers")
     if not isinstance(plan["operations"], list):
         raise FixError("reviewed plan operations must be a list")
     for operation in plan["operations"]:
@@ -138,6 +145,15 @@ def _validate_plan(plan: dict[str, Any]) -> None:
             )
         ):
             raise FixError("reviewed plan contains an incomplete deletion operation")
+        evidence_files = operation.get("evidence_files")
+        if not isinstance(evidence_files, list):
+            raise FixError("reviewed plan operation is missing evidence_files")
+        for evidence in evidence_files:
+            if not isinstance(evidence, dict) or not all(
+                isinstance(evidence.get(key), str) and evidence.get(key)
+                for key in ("path", "sha256")
+            ):
+                raise FixError("reviewed plan contains invalid evidence file data")
     expected = _plan_id(plan)
     if plan["plan_id"] != expected:
         raise FixError("reviewed plan content does not match its plan_id")
@@ -153,6 +169,7 @@ def _plan_id(plan: dict[str, Any]) -> str:
             "base_sha",
             "head_sha",
             "config_sha256",
+            "automatic_deletion_blockers",
             "operations",
         )
     }

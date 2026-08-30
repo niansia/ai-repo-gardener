@@ -32,7 +32,10 @@ def safe_candidates(findings: list[Finding]) -> list[Finding]:
 
 
 def apply_deletions(
-    root: Path, findings: list[Finding], validation_commands: list[str]
+    root: Path,
+    findings: list[Finding],
+    validation_commands: list[str],
+    reviewed_plan: dict[str, object] | None = None,
 ) -> dict[str, object]:
     if not validation_commands:
         raise FixError(
@@ -46,7 +49,7 @@ def apply_deletions(
         raise FixError(
             "candidate files disappeared before apply: " + ", ".join(missing)
         )
-    _verify_plan(root, findings)
+    _verify_plan(root, findings, reviewed_plan)
 
     operation_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     state_root = root / STATE_DIRECTORY
@@ -77,7 +80,7 @@ def apply_deletions(
 
     results: list[dict[str, object]] = []
     try:
-        _verify_plan(root, findings)
+        _verify_plan(root, findings, reviewed_plan)
         for path in files:
             path.unlink()
         for command in validation_commands:
@@ -165,7 +168,11 @@ def _safe_target(root: Path, relative_path: str) -> Path:
     return target
 
 
-def _verify_plan(root: Path, findings: list[Finding]) -> None:
+def _verify_plan(
+    root: Path,
+    findings: list[Finding],
+    reviewed_plan: dict[str, object] | None = None,
+) -> None:
     for finding in findings:
         candidate = _safe_target(root, finding.path)
         expected_candidate = _evidence_value(finding, "candidate_sha256")
@@ -184,6 +191,37 @@ def _verify_plan(root: Path, findings: list[Finding]) -> None:
                 raise FixError(
                     "stale plan: replacement changed since analysis: "
                     f"{finding.replacement}"
+                )
+    if reviewed_plan is not None:
+        _verify_evidence_files(root, reviewed_plan)
+
+
+def _verify_evidence_files(root: Path, plan: dict[str, object]) -> None:
+    operations = plan.get("operations", [])
+    if not isinstance(operations, list):
+        raise FixError("reviewed plan operations must be a list")
+    for operation in operations:
+        if not isinstance(operation, dict):
+            raise FixError("reviewed plan contains an invalid operation")
+        evidence_files = operation.get("evidence_files", [])
+        if not isinstance(evidence_files, list):
+            raise FixError("reviewed plan evidence_files must be a list")
+        for evidence in evidence_files:
+            if not isinstance(evidence, dict):
+                raise FixError("reviewed plan contains invalid evidence file data")
+            relative = evidence.get("path")
+            expected = evidence.get("sha256")
+            if not isinstance(relative, str) or not isinstance(expected, str):
+                raise FixError("reviewed plan contains incomplete evidence file data")
+            path = _safe_target(root, relative)
+            if path.is_symlink():
+                raise FixError(
+                    f"stale plan: evidence file became a symlink: {relative}"
+                )
+            current = _hash(path) if path.is_file() else "missing"
+            if current != expected:
+                raise FixError(
+                    f"stale plan: evidence file changed since review: {relative}"
                 )
 
 

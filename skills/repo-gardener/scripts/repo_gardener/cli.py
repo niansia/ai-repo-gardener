@@ -151,13 +151,29 @@ def _run_fix(analyzer: Analyzer, root: Path, args: argparse.Namespace) -> int:
     try:
         report = analyzer.report("stale", base)
         candidates = safe_candidates(report.findings)
-        plan = build_plan(root, candidates, base, analyzer.config, args.apply)
+        blockers = _automatic_deletion_blockers(analyzer)
+        plan = build_plan(
+            root,
+            candidates,
+            base,
+            analyzer.config,
+            args.apply,
+            blockers,
+        )
         if reviewed:
             require_matching_plan(reviewed, plan)
     except (FixError, ValueError) as exc:
         return _error(str(exc))
     if args.format == "pretty":
-        print(render_fix_plan(candidates, str(root), args.apply, str(plan["plan_id"])))
+        print(
+            render_fix_plan(
+                candidates,
+                str(root),
+                args.apply,
+                str(plan["plan_id"]),
+                blockers,
+            )
+        )
         if analyzer.config.validation_commands and not args.trust_repo_config:
             print(
                 "\nRepository-configured validation commands are ignored unless "
@@ -176,7 +192,7 @@ def _run_fix(analyzer: Analyzer, root: Path, args: argparse.Namespace) -> int:
             "--validate commands or knowingly opt in with --trust-repo-config"
         )
     try:
-        manifest = apply_deletions(root, candidates, commands)
+        manifest = apply_deletions(root, candidates, commands, reviewed)
     except (FixError, OSError) as exc:
         return _error(str(exc))
     if args.format == "json":
@@ -220,6 +236,35 @@ def _run_analysis(analyzer: Analyzer, args: argparse.Namespace) -> int:
 def _error(message: str) -> int:
     print(f"error: {message}", file=sys.stderr)
     return 2
+
+
+def _automatic_deletion_blockers(analyzer: Analyzer) -> list[str]:
+    blockers: list[str] = []
+    parse_errors = sorted(
+        record.relative_path for record in analyzer.records if record.parse_error
+    )
+    if parse_errors:
+        blockers.append(
+            f"{len(parse_errors)} Python file(s) could not be parsed: "
+            + ", ".join(parse_errors[:3])
+        )
+    opaque = sorted(
+        record.relative_path
+        for record in analyzer.records
+        if record.opaque_dynamic_discovery
+    )
+    if opaque:
+        blockers.append("opaque runtime module discovery: " + ", ".join(opaque[:3]))
+    packaging = sorted(
+        {
+            source
+            for record in analyzer.records
+            for source in record.packaging_uncertainty
+        }
+    )
+    if packaging:
+        blockers.append("unresolved packaging metadata: " + ", ".join(packaging[:3]))
+    return blockers
 
 
 if __name__ == "__main__":

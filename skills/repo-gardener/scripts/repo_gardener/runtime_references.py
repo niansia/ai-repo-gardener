@@ -23,8 +23,12 @@ class RuntimeReferenceScanner:
         self.tree = tree
 
     def scan(self) -> RuntimeReferences:
-        dynamic_calls, discovery_calls = self._known_callables()
+        dynamic_calls, discovery_calls, execution_calls, reflection_owners = (
+            self._known_callables()
+        )
         dynamic_calls = self._propagate_assignment_aliases(dynamic_calls)
+        discovery_calls = self._propagate_assignment_aliases(discovery_calls)
+        execution_calls = self._propagate_assignment_aliases(execution_calls)
         modules: set[str] = set()
         possible_modules = self._module_shaped_strings()
         opaque = False
@@ -32,8 +36,19 @@ class RuntimeReferenceScanner:
             if not isinstance(node, ast.Call):
                 continue
             name = _call_name(node.func)
+            if name in execution_calls:
+                opaque = True
+                continue
+            if name == "getattr" and _is_loader_reflection(node, reflection_owners):
+                opaque = True
+                continue
             if name in discovery_calls or name.endswith(
-                (".entry_points", ".iter_entry_points")
+                (
+                    ".entry_points",
+                    ".iter_entry_points",
+                    ".iter_modules",
+                    ".walk_packages",
+                )
             ):
                 opaque = True
                 continue
@@ -57,13 +72,21 @@ class RuntimeReferenceScanner:
             opaque,
         )
 
-    def _known_callables(self) -> tuple[set[str], set[str]]:
+    def _known_callables(
+        self,
+    ) -> tuple[set[str], set[str], set[str], set[str]]:
         importlib_aliases = {"importlib"}
         import_module_aliases: set[str] = set()
         metadata_aliases: set[str] = set()
         entry_points_aliases: set[str] = set()
         runpy_aliases = {"runpy"}
         run_module_aliases: set[str] = set()
+        builtins_aliases = {"builtins"}
+        import_aliases: set[str] = set()
+        eval_aliases: set[str] = set()
+        exec_aliases: set[str] = set()
+        pkgutil_aliases = {"pkgutil"}
+        pkgutil_discovery_aliases: set[str] = set()
         for node in ast.walk(self.tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
@@ -73,6 +96,10 @@ class RuntimeReferenceScanner:
                         metadata_aliases.add(alias.asname or alias.name)
                     elif alias.name == "runpy":
                         runpy_aliases.add(alias.asname or alias.name)
+                    elif alias.name == "builtins":
+                        builtins_aliases.add(alias.asname or alias.name)
+                    elif alias.name == "pkgutil":
+                        pkgutil_aliases.add(alias.asname or alias.name)
             elif isinstance(node, ast.ImportFrom):
                 if node.module == "importlib":
                     import_module_aliases.update(
@@ -92,20 +119,56 @@ class RuntimeReferenceScanner:
                         for alias in node.names
                         if alias.name == "run_module"
                     )
+                elif node.module == "builtins":
+                    import_aliases.update(
+                        alias.asname or alias.name
+                        for alias in node.names
+                        if alias.name == "__import__"
+                    )
+                    eval_aliases.update(
+                        alias.asname or alias.name
+                        for alias in node.names
+                        if alias.name == "eval"
+                    )
+                    exec_aliases.update(
+                        alias.asname or alias.name
+                        for alias in node.names
+                        if alias.name == "exec"
+                    )
+                elif node.module == "pkgutil":
+                    pkgutil_discovery_aliases.update(
+                        alias.asname or alias.name
+                        for alias in node.names
+                        if alias.name in {"iter_modules", "walk_packages"}
+                    )
         dynamic_calls = {
             "__import__",
+            *import_aliases,
             *import_module_aliases,
             *run_module_aliases,
             *(f"{alias}.import_module" for alias in importlib_aliases),
             *(f"{alias}.run_module" for alias in runpy_aliases),
+            *(f"{alias}.__import__" for alias in builtins_aliases),
         }
         discovery_calls = {
             *entry_points_aliases,
+            *pkgutil_discovery_aliases,
             "importlib.metadata.entry_points",
             "pkg_resources.iter_entry_points",
             *(f"{alias}.entry_points" for alias in metadata_aliases),
+            *(f"{alias}.iter_modules" for alias in pkgutil_aliases),
+            *(f"{alias}.walk_packages" for alias in pkgutil_aliases),
         }
-        return dynamic_calls, discovery_calls
+        execution_calls = {
+            "eval",
+            "exec",
+            *eval_aliases,
+            *exec_aliases,
+            *(f"{alias}.eval" for alias in builtins_aliases),
+            *(f"{alias}.exec" for alias in builtins_aliases),
+        }
+        reflection_owners = {*importlib_aliases, *builtins_aliases}
+        return dynamic_calls, discovery_calls, execution_calls, reflection_owners
 
     def _propagate_assignment_aliases(self, known: set[str]) -> set[str]:
         assignments: list[tuple[list[str], str]] = []
@@ -157,3 +220,12 @@ def _call_name(node: ast.AST) -> str:
         prefix = _call_name(node.value)
         return f"{prefix}.{node.attr}" if prefix else node.attr
     return ""
+
+
+def _is_loader_reflection(node: ast.Call, owners: set[str]) -> bool:
+    if len(node.args) < 2 or _call_name(node.args[0]) not in owners:
+        return False
+    attribute = node.args[1]
+    if not isinstance(attribute, ast.Constant) or not isinstance(attribute.value, str):
+        return True
+    return attribute.value in {"import_module", "__import__"}
