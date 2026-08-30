@@ -76,6 +76,10 @@ def test_literal_dynamic_import_is_treated_as_live(tmp_path: Path) -> None:
         "from importlib import import_module\nimport_module('parser_old')",
         "from importlib import import_module as im\nim('parser_old')",
         "import importlib as il\nil.import_module('parser_old')",
+        (
+            "from importlib import import_module\n"
+            "loader = import_module\nloader2 = loader\nloader2('parser_old')"
+        ),
     ],
 )
 def test_aliased_literal_dynamic_import_is_treated_as_live(
@@ -93,6 +97,39 @@ def test_aliased_literal_dynamic_import_is_treated_as_live(
     report = Analyzer(tmp_path).report("stale")
 
     assert not any(finding.path == "parser_old.py" for finding in report.findings)
+
+
+def test_runpy_and_module_shaped_registry_strings_keep_modules_live(
+    tmp_path: Path,
+) -> None:
+    write_project(
+        tmp_path,
+        {
+            "app.py": (
+                "import launcher\nimport registry\n\n"
+                "BACKEND = 'registry_old:Backend'\n\n"
+                "if __name__ == '__main__':\n    launcher.launch()"
+            ),
+            "launcher.py": (
+                "import runpy\n\ndef launch():\n"
+                "    return runpy.run_module('parser_old')"
+            ),
+            "parser_old.py": "def parse(value):\n    return value.strip()",
+            "parser.py": "def parse(value):\n    return value.strip()",
+            "registry_old.py": "class Backend:\n    pass",
+            "registry.py": "class Backend:\n    pass",
+        },
+    )
+
+    report = Analyzer(tmp_path).report("stale")
+
+    assert not any(finding.path == "parser_old.py" for finding in report.findings)
+    registry_finding = next(
+        finding for finding in report.findings if finding.path == "registry_old.py"
+    )
+    assert registry_finding.risk >= 0.75
+    assert registry_finding.recommendation == "review"
+    assert any("module_shaped_string" in risk for risk in registry_finding.risks)
 
 
 def test_nonliteral_dynamic_discovery_disables_safe_deletion(tmp_path: Path) -> None:
@@ -157,6 +194,149 @@ legacy = "plugin_old:run"
     assert not any(
         finding.path == "plugin_old.py" for finding in analyzer.report("stale").findings
     )
+
+
+@pytest.mark.parametrize(
+    ("metadata_name", "metadata_source"),
+    [
+        (
+            "setup.cfg",
+            """
+[metadata]
+name = demo
+
+[options.entry_points]
+demo.plugins =
+    legacy = plugin_old:run
+""",
+        ),
+        (
+            "setup.py",
+            """
+from setuptools import setup
+
+setup(
+    name="demo",
+    entry_points={"demo.plugins": ["legacy=plugin_old:run"]},
+)
+""",
+        ),
+    ],
+)
+def test_legacy_packaging_entrypoint_is_a_graph_root(
+    tmp_path: Path, metadata_name: str, metadata_source: str
+) -> None:
+    write_project(
+        tmp_path,
+        {
+            metadata_name: metadata_source,
+            "app.py": "import plugin\n\nif __name__ == '__main__':\n    pass",
+            "plugin.py": "def run():\n    return True",
+            "plugin_old.py": "def run():\n    return True",
+        },
+    )
+
+    analyzer = Analyzer(tmp_path)
+
+    assert "plugin_old" in analyzer.graph.roots
+    assert not any(
+        finding.path == "plugin_old.py" for finding in analyzer.report("stale").findings
+    )
+
+
+def test_nonliteral_setup_metadata_disables_safe_deletion(tmp_path: Path) -> None:
+    write_project(
+        tmp_path,
+        {
+            "setup.py": "from setuptools import setup\nsetup(entry_points=ENTRY_POINTS)",
+            "app.py": "import parser\n\nif __name__ == '__main__':\n    pass",
+            "parser.py": "def parse(value):\n    return value.strip()",
+            "parser_old.py": "def parse(value):\n    return value.strip()",
+        },
+    )
+
+    finding = next(
+        item
+        for item in Analyzer(tmp_path).report("stale").findings
+        if item.path == "parser_old.py"
+    )
+
+    assert finding.risk == 1.0
+    assert finding.recommendation == "review"
+    assert any("packaging_entrypoint_uncertainty" in risk for risk in finding.risks)
+
+
+def test_setup_function_alias_entrypoint_is_a_graph_root(tmp_path: Path) -> None:
+    write_project(
+        tmp_path,
+        {
+            "setup.py": (
+                "from setuptools import setup as package\n"
+                "build = package\n"
+                "build(entry_points={'demo.plugins': ['legacy=plugin_old:run']})"
+            ),
+            "app.py": "import plugin\n\nif __name__ == '__main__':\n    pass",
+            "plugin.py": "def run():\n    return True",
+            "plugin_old.py": "def run():\n    return True",
+        },
+    )
+
+    analyzer = Analyzer(tmp_path)
+
+    assert "plugin_old" in analyzer.graph.roots
+    assert not any(
+        finding.path == "plugin_old.py" for finding in analyzer.report("stale").findings
+    )
+
+
+def test_pep420_namespace_package_has_external_api_risk(tmp_path: Path) -> None:
+    write_project(
+        tmp_path,
+        {
+            "pyproject.toml": """
+[project]
+name = "acme-tools"
+version = "0.1.0"
+
+[tool.setuptools.packages.find]
+namespaces = true
+""",
+            "app.py": "import acme.plugin\n\nif __name__ == '__main__':\n    pass",
+            "acme/plugin.py": "def run():\n    return True",
+            "acme/plugin_old.py": "def run():\n    return True",
+        },
+    )
+
+    finding = next(
+        item
+        for item in Analyzer(tmp_path).report("stale").findings
+        if item.path == "acme/plugin_old.py"
+    )
+
+    assert finding.risk >= 0.45
+    assert finding.recommendation == "review"
+
+
+def test_implicit_pep420_namespace_package_has_external_api_risk(
+    tmp_path: Path,
+) -> None:
+    write_project(
+        tmp_path,
+        {
+            "app.py": "import acme.plugin\n\nif __name__ == '__main__':\n    pass",
+            "acme/plugin.py": "def run():\n    return True",
+            "acme/plugin_old.py": "def run():\n    return True",
+        },
+    )
+
+    finding = next(
+        item
+        for item in Analyzer(tmp_path).report("stale").findings
+        if item.path == "acme/plugin_old.py"
+    )
+
+    assert finding.risk >= 0.45
+    assert finding.recommendation == "review"
 
 
 def test_src_prefix_import_resolves_to_installed_module(tmp_path: Path) -> None:

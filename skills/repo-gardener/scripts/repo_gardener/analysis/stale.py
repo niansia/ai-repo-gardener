@@ -295,10 +295,16 @@ def _risk(
         risk = max(risk, 0.45)
         risks.append("public_api_or_package_init")
     elif (
-        _is_package_module(record, records) and not config.allow_delete_package_modules
-    ):
+        record.possible_package_module or _is_package_module(record, records)
+    ) and not config.allow_delete_package_modules:
         risk = max(risk, 0.45)
         risks.append("possible_external_package_module")
+    if record.packaging_uncertainty:
+        risk = 1.0
+        risks.append(
+            "packaging_entrypoint_uncertainty:"
+            + ",".join(record.packaging_uncertainty[:3])
+        )
     elif record.relative_path.startswith("src/") and not config.allow_delete_src:
         risk = max(risk, 0.25)
         risks.append("possible_external_package_module")
@@ -322,6 +328,20 @@ def _risk(
     if dynamic_users:
         risk = max(risk, 0.75)
         risks.append("dynamic_reference:" + ",".join(sorted(dynamic_users)[:3]))
+    string_users = [
+        user.relative_path
+        for user in records
+        if any(
+            any(
+                value == name or value.startswith(name + ".")
+                for name in (record.module, *record.module_aliases)
+            )
+            for value in user.runtime_string_refs
+        )
+    ]
+    if string_users:
+        risk = max(risk, 0.75)
+        risks.append("module_shaped_string:" + ",".join(sorted(string_users)[:3]))
     return risk, risks
 
 

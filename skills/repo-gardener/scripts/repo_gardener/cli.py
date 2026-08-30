@@ -4,8 +4,10 @@ import argparse
 import sys
 from pathlib import Path
 
+from . import __version__
 from .analysis import Analyzer
 from .fixes import FixError, apply_deletions, restore_last, safe_candidates
+from .plans import build_plan, load_reviewed_plan, require_matching_plan
 from .reporting import render_fix_json, render_fix_plan, render_json, render_pretty
 
 
@@ -14,7 +16,9 @@ def build_parser() -> argparse.ArgumentParser:
         prog="repo-gardener",
         description="Find AI iteration leftovers with deterministic evidence.",
     )
-    parser.add_argument("--version", action="version", version="repo-gardener 0.1.0")
+    parser.add_argument(
+        "--version", action="version", version=f"repo-gardener {__version__}"
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
     for command, help_text in [
         ("scan", "Run the supported repo-GC analysis"),
@@ -50,7 +54,7 @@ def build_parser() -> argparse.ArgumentParser:
     fix.add_argument("--config", type=Path, help="Config file path")
     fix.add_argument(
         "--base",
-        help="Git ref that predates the agent iteration; use the same base as diff",
+        help="Git ref that predates the agent iteration (defaults to HEAD)",
     )
     mode = fix.add_mutually_exclusive_group()
     mode.add_argument(
@@ -77,6 +81,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Validation command; repeatable",
     )
     fix.add_argument("--format", choices=("pretty", "json"), default="pretty")
+    fix.add_argument(
+        "--plan",
+        type=Path,
+        help="Reviewed dry-run JSON plan; required with --apply",
+    )
     fix.add_argument(
         "--trust-repo-config",
         action="store_true",
@@ -105,6 +114,8 @@ def main(argv: list[str] | None = None) -> int:
     if not root.is_dir():
         return _error(f"repository path does not exist: {root}")
     if args.command == "fix" and args.restore:
+        if args.plan:
+            return _error("--plan cannot be combined with --restore")
         return _run_restore(root)
     try:
         analyzer = Analyzer(root, args.config)
@@ -128,13 +139,25 @@ def _run_restore(root: Path) -> int:
 
 
 def _run_fix(analyzer: Analyzer, root: Path, args: argparse.Namespace) -> int:
+    if args.plan and not args.apply:
+        return _error("--plan is only valid with --apply")
+    if args.apply and not args.plan:
+        return _error("--apply requires a reviewed JSON plan via --plan")
     try:
-        report = analyzer.report("stale", args.base)
-    except ValueError as exc:
+        reviewed = load_reviewed_plan(args.plan) if args.plan else None
+    except FixError as exc:
         return _error(str(exc))
-    candidates = safe_candidates(report.findings)
+    base = args.base or (str(reviewed["base_ref"]) if reviewed else "HEAD")
+    try:
+        report = analyzer.report("stale", base)
+        candidates = safe_candidates(report.findings)
+        plan = build_plan(root, candidates, base, analyzer.config, args.apply)
+        if reviewed:
+            require_matching_plan(reviewed, plan)
+    except (FixError, ValueError) as exc:
+        return _error(str(exc))
     if args.format == "pretty":
-        print(render_fix_plan(candidates, str(root), args.apply))
+        print(render_fix_plan(candidates, str(root), args.apply, str(plan["plan_id"])))
         if analyzer.config.validation_commands and not args.trust_repo_config:
             print(
                 "\nRepository-configured validation commands are ignored unless "
@@ -142,7 +165,7 @@ def _run_fix(analyzer: Analyzer, root: Path, args: argparse.Namespace) -> int:
             )
     if not args.apply or not candidates:
         if args.format == "json":
-            print(render_fix_json(candidates, str(root), args.apply, args.base))
+            print(render_fix_json(plan))
         return 0
     commands = list(args.validate)
     if args.trust_repo_config:
@@ -157,7 +180,7 @@ def _run_fix(analyzer: Analyzer, root: Path, args: argparse.Namespace) -> int:
     except (FixError, OSError) as exc:
         return _error(str(exc))
     if args.format == "json":
-        print(render_fix_json(candidates, str(root), True, args.base, manifest))
+        print(render_fix_json(plan, manifest))
     else:
         print(f"\nApplied operation {manifest['operation_id']}; validation passed.")
     return 0

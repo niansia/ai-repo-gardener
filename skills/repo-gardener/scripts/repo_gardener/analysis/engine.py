@@ -6,7 +6,6 @@ from pathlib import Path
 from ..config import Config, load_config
 from ..discovery import (
     classify_path,
-    configured_entrypoint_modules,
     discover_python_files,
     is_configured_entrypoint,
     module_names,
@@ -21,6 +20,7 @@ from ..git_support import (
 )
 from ..graph import ModuleGraph
 from ..models import FileRecord, Finding, Report
+from ..packaging_metadata import discover_packaging_metadata
 from ..parsing import parse_file, parse_source, populate_style
 from .stale import stale_findings
 from .structure import structure_findings
@@ -31,8 +31,14 @@ class Analyzer:
     def __init__(self, root: Path, config_path: Path | None = None):
         self.root = root.resolve()
         self.config: Config = load_config(self.root, config_path)
-        entrypoint_modules = configured_entrypoint_modules(self.root, self.config)
+        packaging = discover_packaging_metadata(self.root, self.config)
+        entrypoint_modules = set(packaging.entrypoint_modules)
         self.records = self._load_records(entrypoint_modules)
+        for record in self.records:
+            record.possible_package_module = packaging.is_namespace_module(
+                self.root, record.relative_path
+            )
+            record.packaging_uncertainty = packaging.uncertainty_sources
         self.graph = ModuleGraph(self.records, entrypoint_modules)
 
     def report(

@@ -199,6 +199,17 @@ def test_fail_on_returns_ci_exit_codes(tmp_path: Path) -> None:
     assert main(["scan", str(tmp_path), "--fail-on", "high"]) == 0
 
 
+def test_apply_requires_a_reviewed_plan(tmp_path: Path, capsys) -> None:
+    write_project(tmp_path, {"app.py": "VALUE = 1"})
+
+    exit_code = main(
+        ["fix", str(tmp_path), "--apply", "--validate", "python -m pytest"]
+    )
+
+    assert exit_code == 2
+    assert "requires a reviewed JSON plan" in capsys.readouterr().err
+
+
 def test_scan_requires_explicit_opt_in_for_experimental_rules(tmp_path: Path) -> None:
     files = {
         "repo-gardener.toml": "[analysis]\nflat_directory_threshold = 4",
@@ -280,10 +291,37 @@ def test_fix_uses_the_same_git_base_as_diff(tmp_path: Path, capsys) -> None:
     assert exit_code == 0
     assert payload["plan_id"]
     assert payload["operations"][0]["candidate_sha256"]
+    assert payload["base_ref"] == "HEAD~1"
+    assert payload["base_sha"]
+    assert payload["head_sha"]
+    assert payload["config_sha256"]
+    plan_path = tmp_path / "reviewed-plan.json"
+    plan_path.write_text(json.dumps(payload), encoding="utf-8")
 
     validation = (
         f"\"{sys.executable}\" -c \"import parser; assert parser.parse(' x ') == 'x'\""
     )
+    tampered = json.loads(json.dumps(payload))
+    tampered["operations"][0]["path"] = "another.py"
+    tampered_path = tmp_path / "tampered-plan.json"
+    tampered_path.write_text(json.dumps(tampered), encoding="utf-8")
+    assert (
+        main(
+            [
+                "fix",
+                str(tmp_path),
+                "--apply",
+                "--plan",
+                str(tampered_path),
+                "--validate",
+                validation,
+            ]
+        )
+        == 2
+    )
+    assert "does not match its plan_id" in capsys.readouterr().err
+    assert (tmp_path / "parser_v2.py").is_file()
+
     exit_code = main(
         [
             "fix",
@@ -291,6 +329,8 @@ def test_fix_uses_the_same_git_base_as_diff(tmp_path: Path, capsys) -> None:
             "--base",
             "HEAD~1",
             "--apply",
+            "--plan",
+            str(plan_path),
             "--validate",
             validation,
         ]
@@ -334,11 +374,132 @@ def test_repo_validation_commands_require_explicit_trust(
     _git(executable, tmp_path, "add", ".")
     _git(executable, tmp_path, "commit", "-m", "new parser")
 
-    exit_code = main(["fix", str(tmp_path), "--base", "HEAD~1", "--apply"])
+    assert (
+        main(
+            [
+                "fix",
+                str(tmp_path),
+                "--base",
+                "HEAD~1",
+                "--dry-run",
+                "--format",
+                "json",
+            ]
+        )
+        == 0
+    )
+    plan_path = tmp_path / "reviewed-plan.json"
+    plan_path.write_text(capsys.readouterr().out, encoding="utf-8")
+
+    exit_code = main(
+        [
+            "fix",
+            str(tmp_path),
+            "--base",
+            "HEAD~1",
+            "--apply",
+            "--plan",
+            str(plan_path),
+        ]
+    )
 
     assert exit_code == 2
     assert not (tmp_path / "repo-command-ran.txt").exists()
     assert "untrusted" in capsys.readouterr().err
+
+
+def test_fix_defaults_to_head_like_diff(tmp_path: Path, capsys) -> None:
+    executable = git_executable()
+    if executable is None:
+        pytest.skip("git is unavailable")
+    write_project(
+        tmp_path,
+        {
+            "app.py": "import parser_v2\n\nif __name__ == '__main__':\n    pass",
+            "parser_v2.py": "def parse(value):\n    return value.strip()",
+        },
+    )
+    _git(executable, tmp_path, "init")
+    _git(executable, tmp_path, "config", "user.email", "tests@example.com")
+    _git(executable, tmp_path, "config", "user.name", "Repo Gardener Tests")
+    _git(executable, tmp_path, "add", ".")
+    _git(executable, tmp_path, "commit", "-m", "baseline")
+    write_project(
+        tmp_path,
+        {
+            "app.py": "import parser\n\nif __name__ == '__main__':\n    pass",
+            "parser.py": "def parse(value):\n    return value.strip()",
+        },
+    )
+
+    assert main(["diff", str(tmp_path)]) == 0
+    assert "parser_v2.py" in capsys.readouterr().out
+    assert main(["fix", str(tmp_path), "--dry-run"]) == 0
+    assert "DELETE parser_v2.py" in capsys.readouterr().out
+
+
+def test_apply_refuses_operations_not_in_reviewed_plan(tmp_path: Path, capsys) -> None:
+    executable = git_executable()
+    if executable is None:
+        pytest.skip("git is unavailable")
+    write_project(
+        tmp_path,
+        {
+            "app.py": (
+                "import parser_v2\nimport utils_v2\n\n"
+                "if __name__ == '__main__':\n    pass"
+            ),
+            "parser_v2.py": "def parse(value):\n    return value.strip()",
+            "utils_v2.py": "def clean(value):\n    return value.strip()",
+        },
+    )
+    _git(executable, tmp_path, "init")
+    _git(executable, tmp_path, "config", "user.email", "tests@example.com")
+    _git(executable, tmp_path, "config", "user.name", "Repo Gardener Tests")
+    _git(executable, tmp_path, "add", ".")
+    _git(executable, tmp_path, "commit", "-m", "baseline")
+    write_project(
+        tmp_path,
+        {
+            "app.py": (
+                "import parser\nimport utils_v2\n\nif __name__ == '__main__':\n    pass"
+            ),
+            "parser.py": "def parse(value):\n    return value.strip()",
+        },
+    )
+    assert main(["fix", str(tmp_path), "--dry-run", "--format", "json"]) == 0
+    reviewed = json.loads(capsys.readouterr().out)
+    assert [item["path"] for item in reviewed["operations"]] == ["parser_v2.py"]
+    plan_path = tmp_path / "reviewed-plan.json"
+    plan_path.write_text(json.dumps(reviewed), encoding="utf-8")
+
+    write_project(
+        tmp_path,
+        {
+            "app.py": (
+                "import parser\nimport utils\n\nif __name__ == '__main__':\n    pass"
+            ),
+            "utils.py": "def clean(value):\n    return value.strip()",
+        },
+    )
+    validation = f'"{sys.executable}" -c "import sys; sys.exit(0)"'
+
+    exit_code = main(
+        [
+            "fix",
+            str(tmp_path),
+            "--apply",
+            "--plan",
+            str(plan_path),
+            "--validate",
+            validation,
+        ]
+    )
+
+    assert exit_code == 2
+    assert (tmp_path / "parser_v2.py").is_file()
+    assert (tmp_path / "utils_v2.py").is_file()
+    assert "reviewed plan no longer matches" in capsys.readouterr().err
 
 
 def test_gitignore_is_respected_without_a_git_repository(tmp_path: Path) -> None:

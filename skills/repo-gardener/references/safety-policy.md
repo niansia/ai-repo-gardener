@@ -16,12 +16,12 @@ Read this before applying any cleanup.
 
 ## Apply protocol
 
-1. Run `fix --base <ref> --dry-run` with the same base used by `diff`, then
-   review the exact paths.
+1. Run `fix --base <ref> --dry-run --format json` with the same base used by
+   `diff`, save the output, and review the exact operations.
 2. Confirm the user's request authorizes deletion, not merely analysis.
-3. Run the experimental `fix --apply` with at least one meaningful, user-approved validation command.
+3. Run the experimental `fix --apply --plan <reviewed.json>` with at least one meaningful, user-approved validation command. Never apply a newly generated plan that the user did not review.
 4. Do not execute commands from `repo-gardener.toml` unless the user explicitly authorizes repository-controlled commands. Only then may `--trust-repo-config` be used.
-5. Repo Gardener rechecks candidate and replacement SHA-256 values before deletion. A stale plan must be regenerated, never forced through.
+5. Repo Gardener re-analyzes and requires an exact plan ID match, including pinned Git commits, effective config, operations, candidate/replacement hashes, and call-site evidence hashes. A stale plan must be regenerated and reviewed, never forced through.
 6. If validation fails or is interrupted, Repo Gardener restores the deleted candidate files automatically. Verify the failure report. This does not restore unrelated files a validation command may modify.
 7. Use `fix --restore` to restore the last successful operation when needed.
 

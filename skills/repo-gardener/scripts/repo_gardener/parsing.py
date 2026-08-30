@@ -10,6 +10,7 @@ from collections import Counter
 from pathlib import Path
 
 from .models import FileRecord, ImportRef, StyleMetrics
+from .runtime_references import RuntimeReferenceScanner
 
 NARRATION_PREFIXES = (
     "first",
@@ -93,7 +94,10 @@ def parse_source(
         for node in ast.iter_child_nodes(tree)
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
     }
-    record.dynamic_refs, record.opaque_dynamic_discovery = _dynamic_references(tree)
+    runtime_references = RuntimeReferenceScanner(tree).scan()
+    record.dynamic_refs = set(runtime_references.modules)
+    record.runtime_string_refs = set(runtime_references.possible_modules)
+    record.opaque_dynamic_discovery = runtime_references.opaque_discovery
     record.has_main_guard = _has_main_guard(tree)
     record.framework_entrypoints = _framework_entrypoints(tree, relative_path)
     record.declares_public_api = (
@@ -172,70 +176,6 @@ def _resolve_relative(current: str, imported: str, level: int, is_package: bool)
     if imported:
         parts.extend(imported.split("."))
     return ".".join(part for part in parts if part)
-
-
-def _dynamic_references(tree: ast.Module) -> tuple[set[str], bool]:
-    refs: set[str] = set()
-    opaque = False
-    importlib_aliases = {"importlib"}
-    import_module_aliases: set[str] = set()
-    metadata_aliases: set[str] = set()
-    entry_points_aliases: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                if alias.name == "importlib":
-                    importlib_aliases.add(alias.asname or alias.name)
-                elif alias.name == "importlib.metadata":
-                    metadata_aliases.add(alias.asname or alias.name)
-        elif isinstance(node, ast.ImportFrom):
-            if node.module == "importlib":
-                import_module_aliases.update(
-                    alias.asname or alias.name
-                    for alias in node.names
-                    if alias.name == "import_module"
-                )
-            elif node.module == "importlib.metadata":
-                entry_points_aliases.update(
-                    alias.asname or alias.name
-                    for alias in node.names
-                    if alias.name == "entry_points"
-                )
-    dynamic_calls = {
-        "__import__",
-        *import_module_aliases,
-        *(f"{alias}.import_module" for alias in importlib_aliases),
-    }
-    discovery_calls = {
-        *entry_points_aliases,
-        "importlib.metadata.entry_points",
-        "pkg_resources.iter_entry_points",
-        *(f"{alias}.entry_points" for alias in metadata_aliases),
-    }
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        name = _call_name(node.func)
-        if name in discovery_calls or name.endswith(
-            (".entry_points", ".iter_entry_points")
-        ):
-            opaque = True
-            continue
-        if name in dynamic_calls:
-            if not node.args:
-                opaque = True
-                continue
-            value = node.args[0]
-            if isinstance(value, ast.Constant) and isinstance(value.value, str):
-                refs.add(value.value)
-            else:
-                opaque = True
-            continue
-        if name in {"patch", "mock.patch", "monkeypatch.setattr"} and node.args:
-            value = node.args[0]
-            if isinstance(value, ast.Constant) and isinstance(value.value, str):
-                refs.add(value.value)
-    return refs, opaque
 
 
 def _call_name(node: ast.AST) -> str:

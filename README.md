@@ -3,13 +3,13 @@
 **Find files the AI forgot to delete.**
 
 Repo Gardener is a deterministic garbage collector for AI-edited Python
-repositories. It focuses v0.1 on one job: finding superseded iteration files
+repositories. Version `0.1.0a1` focuses on one job: finding superseded iteration files
 and newly-created orphan files without turning weak guesses into deletions.
 
 ![Repo Gardener diff and safe dry-run demo](docs/demo.gif)
 
 ```text
-$ repo-gardener diff . --base HEAD~1
+$ repo-gardener diff .
 
 [HIGH] stale-file  parser_v2.py -> parser.py
   confidence 100%  risk 0%  action safe_delete_candidate
@@ -17,12 +17,13 @@ $ repo-gardener diff . --base HEAD~1
   - git_chronology: replacement_added_later
   - inbound_imports: 0
 
-$ repo-gardener fix . --base HEAD~1 --dry-run
+$ repo-gardener fix . --dry-run
 DELETE parser_v2.py  (replacement: parser.py, confidence: 100%)
 ```
 
-The analyzer and fixer deliberately use the same `--base`, so a candidate shown
-by `diff` cannot disappear merely because `fix` discarded its Git evidence.
+Both commands default to `--base HEAD`, so their Git evidence connects without
+repeating an option. Use an explicit ref on both commands when auditing a
+committed range.
 
 ## What v0.1 supports
 
@@ -37,8 +38,10 @@ by `diff` cannot disappear merely because `fix` discarded its Git evidence.
 - Both conventional `src/package` imports and literal `src.package` imports.
 - Worktree, staged, committed-range, and untracked changes in `diff` mode.
 - Built-in entrypoint recognition for FastAPI, Flask, Django, Click, and Typer.
-- Alias-aware dynamic import detection, opaque dynamic-discovery blocking, and
-  Python packaging script, GUI script, and plugin entry-point roots.
+- Alias-propagating runtime reference detection for `importlib`, `runpy`,
+  module-shaped strings, and opaque dynamic discovery.
+- Python packaging roots from `pyproject.toml`, `setup.cfg`, and literal
+  `setup.py` entry points; unresolved legacy metadata disables auto-delete.
 - Stable versioned JSON for agents and CI.
 - Python standard library only at runtime; no model call, account, telemetry,
   API key, or network access.
@@ -56,6 +59,18 @@ repo-gardener diff /path/to/project --base HEAD~1
 repo-gardener fix /path/to/project --base HEAD~1 --dry-run
 ```
 
+Applying a deletion requires the exact JSON plan that was reviewed:
+
+```bash
+repo-gardener fix /path/to/project --dry-run --format json > reviewed-plan.json
+repo-gardener fix /path/to/project --apply --plan reviewed-plan.json --validate "python -m pytest"
+```
+
+The plan pins the base ref and SHA, HEAD SHA, effective configuration hash,
+operation set, candidate/replacement hashes, and call-site evidence hashes.
+Apply re-analyzes the repository and exits with an error if the current plan ID
+differs from the reviewed plan.
+
 The bundled Agent Skill is self-contained and can run without installation:
 
 ```bash
@@ -72,9 +87,9 @@ follows the open [Agent Skills specification](https://agentskills.io/specificati
 | `scan` | Run the supported repo-GC rules | Never |
 | `stale` | Find superseded Python files | Never |
 | `diff [--base <ref>]` | Audit committed, worktree, staged, and untracked iteration changes; base defaults to `HEAD` | Never |
-| `fix --base <ref> --dry-run` | Preview matching high-confidence deletions | Never |
-| `fix --base <ref> --dry-run --format json` | Emit a machine-readable plan ID and content hashes | Never |
-| `fix --base <ref> --apply --validate <cmd>` | Experimental: snapshot, delete, validate, and restore deleted files on failure/interruption | Yes |
+| `fix [--base <ref>] --dry-run` | Preview matching high-confidence deletions; base defaults to `HEAD` | Never |
+| `fix [--base <ref>] --dry-run --format json` | Emit the reviewed plan contract | Never |
+| `fix --apply --plan <json> --validate <cmd>` | Experimental: apply exactly the reviewed plan, validate, and restore deleted files on failure/interruption | Yes |
 | `fix --restore` | Restore the latest operation | Yes |
 | `structure` | Run experimental directory analysis explicitly | Never |
 | `style --baseline <ref-or-date>` | Run experimental repo-relative Python style analysis | Never |
@@ -113,6 +128,10 @@ Every mutating run requires validation. Protected paths, generated code,
 migrations, plugin paths, package APIs, dynamic references, partial
 replacements, orphan findings, structure findings, and style findings are never
 automatic deletion candidates.
+
+PEP 420 namespace packages declared through setuptools are treated as possible
+external APIs. Literal module-shaped strings conservatively block automatic
+deletion only when they resolve to a module that exists in the repository.
 
 Copy [`repo-gardener.toml.example`](repo-gardener.toml.example) to
 `repo-gardener.toml` to declare entrypoints, protected paths, exclusions,

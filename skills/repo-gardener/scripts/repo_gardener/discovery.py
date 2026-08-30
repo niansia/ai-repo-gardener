@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-import tomllib
 from pathlib import Path
 
 from .config import Config, matches_any
@@ -153,40 +152,6 @@ def classify_path(root: Path, path: Path) -> str:
     if name in {"conftest.py", "setup.py"} or relative.startswith("scripts/"):
         return "script"
     return "source"
-
-
-def configured_entrypoint_modules(root: Path, config: Config) -> set[str]:
-    modules = {
-        value.split(":", 1)[0].strip()
-        for value in config.entrypoint_modules
-        if value.strip()
-    }
-    pyproject = root / "pyproject.toml"
-    if pyproject.is_file():
-        try:
-            with pyproject.open("rb") as handle:
-                raw = tomllib.load(handle)
-            project = raw.get("project", {})
-            if not isinstance(project, dict):
-                return modules
-            entry_points = project.get("entry-points", {})
-            entrypoint_tables = [
-                project.get("scripts", {}),
-                project.get("gui-scripts", {}),
-                *(entry_points.values() if isinstance(entry_points, dict) else ()),
-            ]
-            for table in entrypoint_tables:
-                if not isinstance(table, dict):
-                    continue
-                for value in table.values():
-                    if not isinstance(value, str):
-                        continue
-                    module = value.split(":", 1)[0].strip()
-                    if module:
-                        modules.add(module)
-        except (OSError, tomllib.TOMLDecodeError):
-            pass
-    return modules
 
 
 def is_configured_entrypoint(

@@ -28,10 +28,10 @@ BOLD_FONT_CANDIDATES = (
 
 FRAMES = [
     [
-        ("$ repo-gardener diff . --base HEAD~1", BLUE),
+        ("$ repo-gardener diff .", BLUE),
     ],
     [
-        ("$ repo-gardener diff . --base HEAD~1", BLUE),
+        ("$ repo-gardener diff .", BLUE),
         ("", TEXT),
         ("Repo Gardener", TEXT),
         (
@@ -45,10 +45,10 @@ FRAMES = [
         ("  - replacement_reachable: True", TEXT),
     ],
     [
-        ("$ repo-gardener fix . --base HEAD~1 --dry-run", BLUE),
+        ("$ repo-gardener fix . --dry-run", BLUE),
     ],
     [
-        ("$ repo-gardener fix . --base HEAD~1 --dry-run", BLUE),
+        ("$ repo-gardener fix . --dry-run", BLUE),
         ("", TEXT),
         ("Repo Gardener safe deletion plan", TEXT),
         (
@@ -56,12 +56,13 @@ FRAMES = [
             MUTED,
         ),
         ("Mode: DRY RUN", MUTED),
+        ("Plan ID: 5390c1a0e3e80051", MUTED),
         ("", TEXT),
         ("DELETE parser_v2.py", YELLOW),
         ("  replacement: parser.py", TEXT),
         ("  confidence: 100%", GREEN),
         ("", TEXT),
-        ("No files changed.", MUTED),
+        ("No files changed. Save the JSON plan before apply.", MUTED),
     ],
 ]
 
