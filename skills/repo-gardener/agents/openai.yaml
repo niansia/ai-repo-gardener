@@ -1,0 +1,4 @@
+interface:
+  display_name: "Repo Gardener"
+  short_description: "Clean AI iteration leftovers with evidence"
+  default_prompt: "Use $repo-gardener to audit this Python repository for stale iteration files after my latest coding-agent changes, using the pre-iteration Git base when available."

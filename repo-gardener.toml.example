@@ -1,0 +1,21 @@
+schema = 1
+
+[entrypoints]
+modules = []
+paths = []
+
+[safety]
+allow_delete_src = false
+protected = [
+  "**/migrations/**",
+  "**/plugins/**",
+  "**/generated/**",
+]
+
+[analysis]
+exclude = []
+flat_directory_threshold = 15
+min_similarity = 0.62
+
+[validation]
+commands = []

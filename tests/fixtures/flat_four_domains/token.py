@@ -1,0 +1,2 @@
+def issue():
+    return "token"

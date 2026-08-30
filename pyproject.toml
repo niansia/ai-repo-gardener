@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "repo-gardener"
+version = "0.1.0"
+description = "Evidence-backed garbage collection for AI-edited Python repositories"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{ name = "Repo Gardener contributors" }]
+keywords = ["ai", "code-quality", "agent-skills", "dead-code", "python"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Quality Assurance",
+]
+dependencies = []
+
+[project.scripts]
+repo-gardener = "repo_gardener.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "skills/repo-gardener/scripts" }
+
+[tool.setuptools.packages.find]
+where = ["skills/repo-gardener/scripts"]
+include = ["repo_gardener*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+pythonpath = ["skills/repo-gardener/scripts"]
+
+[tool.ruff]
+exclude = ["tests/fixtures"]
