@@ -6,6 +6,7 @@ paths = []
 
 [safety]
 allow_delete_src = false
+allow_delete_package_modules = false
 protected = [
   "**/migrations/**",
   "**/plugins/**",
@@ -18,4 +19,5 @@ flat_directory_threshold = 15
 min_similarity = 0.62
 
 [validation]
+# Ignored unless the caller explicitly passes --trust-repo-config.
 commands = []

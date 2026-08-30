@@ -93,7 +93,7 @@ def parse_source(
         for node in ast.iter_child_nodes(tree)
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
     }
-    record.dynamic_refs = _dynamic_references(tree)
+    record.dynamic_refs, record.opaque_dynamic_discovery = _dynamic_references(tree)
     record.has_main_guard = _has_main_guard(tree)
     record.framework_entrypoints = _framework_entrypoints(tree, relative_path)
     record.declares_public_api = (
@@ -145,6 +145,24 @@ def _imports(tree: ast.AST, current_module: str, is_package: bool) -> list[Impor
     return result
 
 
+def import_modules(source: str, current_module: str, is_package: bool) -> set[str]:
+    """Return absolute import targets for current or historical source."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return set()
+    result: set[str] = set()
+    for reference in _imports(tree, current_module, is_package):
+        if reference.module:
+            result.add(reference.module)
+        result.update(
+            f"{reference.module}.{name}" if reference.module else name
+            for name in reference.names
+            if name != "*"
+        )
+    return result
+
+
 def _resolve_relative(current: str, imported: str, level: int, is_package: bool) -> str:
     if level == 0:
         return imported
@@ -156,23 +174,68 @@ def _resolve_relative(current: str, imported: str, level: int, is_package: bool)
     return ".".join(part for part in parts if part)
 
 
-def _dynamic_references(tree: ast.AST) -> set[str]:
+def _dynamic_references(tree: ast.Module) -> tuple[set[str], bool]:
     refs: set[str] = set()
+    opaque = False
+    importlib_aliases = {"importlib"}
+    import_module_aliases: set[str] = set()
+    metadata_aliases: set[str] = set()
+    entry_points_aliases: set[str] = set()
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Call) or not node.args:
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "importlib":
+                    importlib_aliases.add(alias.asname or alias.name)
+                elif alias.name == "importlib.metadata":
+                    metadata_aliases.add(alias.asname or alias.name)
+        elif isinstance(node, ast.ImportFrom):
+            if node.module == "importlib":
+                import_module_aliases.update(
+                    alias.asname or alias.name
+                    for alias in node.names
+                    if alias.name == "import_module"
+                )
+            elif node.module == "importlib.metadata":
+                entry_points_aliases.update(
+                    alias.asname or alias.name
+                    for alias in node.names
+                    if alias.name == "entry_points"
+                )
+    dynamic_calls = {
+        "__import__",
+        *import_module_aliases,
+        *(f"{alias}.import_module" for alias in importlib_aliases),
+    }
+    discovery_calls = {
+        *entry_points_aliases,
+        "importlib.metadata.entry_points",
+        "pkg_resources.iter_entry_points",
+        *(f"{alias}.entry_points" for alias in metadata_aliases),
+    }
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
             continue
         name = _call_name(node.func)
-        if name in {
-            "importlib.import_module",
-            "__import__",
-            "patch",
-            "mock.patch",
-            "monkeypatch.setattr",
-        }:
+        if name in discovery_calls or name.endswith(
+            (".entry_points", ".iter_entry_points")
+        ):
+            opaque = True
+            continue
+        if name in dynamic_calls:
+            if not node.args:
+                opaque = True
+                continue
             value = node.args[0]
             if isinstance(value, ast.Constant) and isinstance(value.value, str):
                 refs.add(value.value)
-    return refs
+            else:
+                opaque = True
+            continue
+        if name in {"patch", "mock.patch", "monkeypatch.setattr"} and node.args:
+            value = node.args[0]
+            if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                refs.add(value.value)
+    return refs, opaque
 
 
 def _call_name(node: ast.AST) -> str:

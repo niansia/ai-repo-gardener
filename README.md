@@ -32,11 +32,13 @@ by `diff` cannot disappear merely because `fix` discarded its Git evidence.
   zero inbound imports, and has no plausible replacement. This is always
   review-only.
 - Safe deletion: snapshot, SHA-256 verification, symlink and path-escape
-  refusal, required validation, automatic restore on failure, and manual
-  restore.
+  refusal, stale-plan rejection, required validation, deleted-file restore on
+  failure or interruption, and manual restore. Apply remains experimental.
 - Both conventional `src/package` imports and literal `src.package` imports.
 - Worktree, staged, committed-range, and untracked changes in `diff` mode.
 - Built-in entrypoint recognition for FastAPI, Flask, Django, Click, and Typer.
+- Alias-aware dynamic import detection, opaque dynamic-discovery blocking, and
+  Python packaging script, GUI script, and plugin entry-point roots.
 - Stable versioned JSON for agents and CI.
 - Python standard library only at runtime; no model call, account, telemetry,
   API key, or network access.
@@ -49,7 +51,7 @@ functions, unused dependencies, or arbitrary duplicate implementations.
 Python 3.11+ is required.
 
 ```bash
-python -m pip install -e .
+python -m pip install .
 repo-gardener diff /path/to/project --base HEAD~1
 repo-gardener fix /path/to/project --base HEAD~1 --dry-run
 ```
@@ -69,9 +71,10 @@ follows the open [Agent Skills specification](https://agentskills.io/specificati
 | --- | --- | --- |
 | `scan` | Run the supported repo-GC rules | Never |
 | `stale` | Find superseded Python files | Never |
-| `diff --base <ref>` | Audit committed, worktree, staged, and untracked iteration changes | Never |
+| `diff [--base <ref>]` | Audit committed, worktree, staged, and untracked iteration changes; base defaults to `HEAD` | Never |
 | `fix --base <ref> --dry-run` | Preview matching high-confidence deletions | Never |
-| `fix --base <ref> --apply --validate <cmd>` | Snapshot, delete, validate, and auto-restore on failure | Yes |
+| `fix --base <ref> --dry-run --format json` | Emit a machine-readable plan ID and content hashes | Never |
+| `fix --base <ref> --apply --validate <cmd>` | Experimental: snapshot, delete, validate, and restore deleted files on failure/interruption | Yes |
 | `fix --restore` | Restore the latest operation | Yes |
 | `structure` | Run experimental directory analysis explicitly | Never |
 | `style --baseline <ref-or-date>` | Run experimental repo-relative Python style analysis | Never |
@@ -85,7 +88,9 @@ v0.1 release claim and do not run in `scan` or `diff` unless
 
 Structure findings report directory load and only expose cluster proposals when
 the import graph yields at least two credible groups. One giant connected
-component is not presented as an architecture plan.
+component is not presented as an architecture plan. A directory over the
+configured module threshold is still reported as a factual load warning even
+when no reliable clusters exist.
 
 Style findings are deviations from a baseline, never proof of AI authorship.
 For repositories already dominated by generated code, provide a pre-AI commit
@@ -112,8 +117,14 @@ automatic deletion candidates.
 Copy [`repo-gardener.toml.example`](repo-gardener.toml.example) to
 `repo-gardener.toml` to declare entrypoints, protected paths, exclusions,
 validation commands, and analysis thresholds. `src/` modules remain protected
-from automatic deletion by default; a repository owner can explicitly set
-`allow_delete_src = true` after confirming the package is not a public API.
+from automatic deletion by default. Any module inside an importable package is
+also treated as a possible external API. A repository owner must explicitly set
+both relevant safety overrides after confirming the package is not public.
+
+Validation commands read from the target repository are untrusted and ignored
+by default. Prefer explicit `--validate` arguments. `--trust-repo-config` is an
+opt-in to execute commands supplied by that repository and should only be used
+after review.
 
 Applied fixes store recoverable snapshots under `.repo-gardener/`. Add this
 line to the target repository's `.gitignore`:
@@ -121,6 +132,10 @@ line to the target repository's `.gitignore`:
 ```gitignore
 .repo-gardener/
 ```
+
+Rollback restores the deleted candidate files. It does not revert unrelated
+files that a validation command may modify, and it cannot recover from process
+termination that prevents cleanup code from running.
 
 The JSON contract is documented in
 [`skills/repo-gardener/references/finding-schema.md`](skills/repo-gardener/references/finding-schema.md).
@@ -132,12 +147,18 @@ string paths, plugins, literal `src.*` imports, agent-created orphans, rename
 chronology, style baselines, and flat-domain examples. Public-repository
 smoke results and exact commit hashes are recorded in
 [`benchmarks/real-world-smoke.md`](benchmarks/real-world-smoke.md). That run is
-not a labeled precision benchmark, so the README makes no precision percentage
-claim.
+not a labeled precision benchmark. The separate adversarial safety gate is
+recorded in [`benchmarks/safety-benchmark.md`](benchmarks/safety-benchmark.md);
+it reports eligible-deletion false positives rather than claiming population
+precision.
+
+For CI, `--fail-on high`, `--fail-on medium`, and `--fail-on any` use exit codes
+`1` for a reached finding threshold and `2` for tool/configuration errors.
 
 ## Development
 
 ```bash
+python -m pip install -e ".[dev]"
 python -m pytest
 ruff check .
 ruff format --check .

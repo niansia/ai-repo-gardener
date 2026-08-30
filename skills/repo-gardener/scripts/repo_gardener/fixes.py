@@ -46,6 +46,7 @@ def apply_deletions(
         raise FixError(
             "candidate files disappeared before apply: " + ", ".join(missing)
         )
+    _verify_plan(root, findings)
 
     operation_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     state_root = root / STATE_DIRECTORY
@@ -74,34 +75,41 @@ def apply_deletions(
     _write_json(snapshot / "manifest.json", manifest)
     _write_json(state_root / "last-operation.json", {"operation_id": snapshot.name})
 
-    for path in files:
-        path.unlink()
-    results = []
-    for command in validation_commands:
-        completed = subprocess.run(
-            command,
-            cwd=root,
-            shell=True,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        results.append(
-            {
-                "command": command,
-                "exit_code": completed.returncode,
-                "stdout": completed.stdout[-4000:],
-                "stderr": completed.stderr[-4000:],
-            }
-        )
-        if completed.returncode != 0:
-            _restore_snapshot(root, snapshot)
-            manifest["status"] = "restored_after_validation_failure"
-            manifest["validation_results"] = results
-            _write_json(snapshot / "manifest.json", manifest)
-            raise FixError(
-                f"validation failed and deleted files were restored: {command}"
+    results: list[dict[str, object]] = []
+    try:
+        _verify_plan(root, findings)
+        for path in files:
+            path.unlink()
+        for command in validation_commands:
+            completed = subprocess.run(
+                command,
+                cwd=root,
+                shell=True,
+                text=True,
+                capture_output=True,
+                check=False,
             )
+            results.append(
+                {
+                    "command": command,
+                    "exit_code": completed.returncode,
+                    "stdout": completed.stdout[-4000:],
+                    "stderr": completed.stderr[-4000:],
+                }
+            )
+            if completed.returncode != 0:
+                raise FixError(f"validation failed: {command}")
+    except BaseException as exc:
+        _restore_snapshot(root, snapshot)
+        manifest["status"] = "restored_after_validation_failure_or_interruption"
+        manifest["validation_results"] = results
+        manifest["failure"] = f"{type(exc).__name__}: {exc}"
+        _write_json(snapshot / "manifest.json", manifest)
+        if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+            raise
+        raise FixError(
+            f"validation failed or was interrupted and deleted files were restored: {exc}"
+        ) from exc
     manifest["status"] = "applied"
     manifest["validation_results"] = results
     _write_json(snapshot / "manifest.json", manifest)
@@ -130,6 +138,8 @@ def _restore_snapshot(root: Path, snapshot: Path) -> dict[str, object]:
         source = snapshot / "files" / entry["path"]
         if not source.is_file():
             raise FixError(f"rollback content missing for {entry['path']}")
+        if destination.is_symlink():
+            raise FixError(f"refusing to restore through a symlink: {entry['path']}")
         if destination.exists() and _hash(destination) != entry["sha256"]:
             raise FixError(
                 f"refusing to overwrite a changed file during restore: {entry['path']}"
@@ -142,12 +152,50 @@ def _restore_snapshot(root: Path, snapshot: Path) -> dict[str, object]:
 
 
 def _safe_target(root: Path, relative_path: str) -> Path:
-    target = (root / relative_path).resolve()
+    relative = Path(relative_path)
+    if relative.is_absolute():
+        raise FixError(f"absolute path is not allowed: {relative_path}")
+    root_resolved = root.resolve()
+    target = root_resolved / relative
+    resolved = target.resolve()
     try:
-        target.relative_to(root.resolve())
+        resolved.relative_to(root_resolved)
     except ValueError as exc:
         raise FixError(f"path escapes repository root: {relative_path}") from exc
     return target
+
+
+def _verify_plan(root: Path, findings: list[Finding]) -> None:
+    for finding in findings:
+        candidate = _safe_target(root, finding.path)
+        expected_candidate = _evidence_value(finding, "candidate_sha256")
+        if expected_candidate and (
+            not candidate.is_file() or _hash(candidate) != expected_candidate
+        ):
+            raise FixError(
+                f"stale plan: candidate changed since analysis: {finding.path}"
+            )
+        expected_replacement = _evidence_value(finding, "replacement_sha256")
+        if expected_replacement and finding.replacement:
+            replacement = _safe_target(root, finding.replacement)
+            if replacement.is_symlink():
+                raise FixError(f"refusing a symlink replacement: {finding.replacement}")
+            if not replacement.is_file() or _hash(replacement) != expected_replacement:
+                raise FixError(
+                    "stale plan: replacement changed since analysis: "
+                    f"{finding.replacement}"
+                )
+
+
+def _evidence_value(finding: Finding, evidence_type: str) -> str | None:
+    return next(
+        (
+            str(item["value"])
+            for item in finding.evidence
+            if item.get("type") == evidence_type and item.get("value")
+        ),
+        None,
+    )
 
 
 def _hash(path: Path) -> str:

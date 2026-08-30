@@ -22,6 +22,7 @@ class Config:
     flat_directory_threshold: int = 15
     min_similarity: float = 0.62
     allow_delete_src: bool = False
+    allow_delete_package_modules: bool = False
     validation_commands: tuple[str, ...] = ()
 
     def is_protected(self, relative_path: str) -> bool:
@@ -78,6 +79,9 @@ def load_config(root: Path, explicit: Path | None = None) -> Config:
         ),
         min_similarity=max(0.3, min(0.95, float(analysis.get("min_similarity", 0.62)))),
         allow_delete_src=bool(safety.get("allow_delete_src", False)),
+        allow_delete_package_modules=bool(
+            safety.get("allow_delete_package_modules", False)
+        ),
         validation_commands=tuple(
             str(value) for value in validation.get("commands", ())
         ),

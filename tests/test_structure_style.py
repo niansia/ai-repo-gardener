@@ -37,7 +37,9 @@ def test_flat_directory_reports_import_affinity_clusters(tmp_path: Path) -> None
     assert finding.recommendation == "proposal_only"
 
 
-def test_large_cohesive_package_is_not_called_flat_entropy(tmp_path: Path) -> None:
+def test_large_cohesive_package_gets_factual_directory_load_finding(
+    tmp_path: Path,
+) -> None:
     files = {
         "repo-gardener.toml": "[analysis]\nflat_directory_threshold = 4",
         "app.py": "import module_0\n\nif __name__ == '__main__':\n    module_0.work()",
@@ -49,7 +51,9 @@ def test_large_cohesive_package_is_not_called_flat_entropy(tmp_path: Path) -> No
 
     report = Analyzer(tmp_path).report("structure")
 
-    assert not any(finding.rule == "flat-directory" for finding in report.findings)
+    finding = next(item for item in report.findings if item.rule == "flat-directory")
+    assert finding.recommendation == "review_directory_load"
+    assert finding.confidence < 0.65
 
 
 def test_one_giant_component_is_not_presented_as_a_cluster_proposal(
@@ -81,6 +85,33 @@ def test_one_giant_component_is_not_presented_as_a_cluster_proposal(
     )
     assert clusters == []
     assert finding.confidence < 0.65
+    assert finding.recommendation == "review_directory_load"
+
+
+def test_twenty_flat_independent_modules_are_reported_without_fake_clusters(
+    tmp_path: Path,
+) -> None:
+    files = {
+        "repo-gardener.toml": "[analysis]\nflat_directory_threshold = 12",
+        **{
+            f"feature_{index}.py": f"def feature_{index}():\n    return {index}"
+            for index in range(20)
+        },
+    }
+    write_project(tmp_path, files)
+
+    finding = next(
+        item
+        for item in Analyzer(tmp_path).report("structure").findings
+        if item.rule == "flat-directory"
+    )
+
+    clusters = next(
+        item["value"]
+        for item in finding.evidence
+        if item["type"] == "probable_clusters"
+    )
+    assert clusters == []
     assert finding.recommendation == "review_directory_load"
 
 

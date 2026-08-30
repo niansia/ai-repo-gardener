@@ -70,6 +70,95 @@ def test_literal_dynamic_import_is_treated_as_live(tmp_path: Path) -> None:
     assert not any(finding.path == "parser_old.py" for finding in report.findings)
 
 
+@pytest.mark.parametrize(
+    "loader",
+    [
+        "from importlib import import_module\nimport_module('parser_old')",
+        "from importlib import import_module as im\nim('parser_old')",
+        "import importlib as il\nil.import_module('parser_old')",
+    ],
+)
+def test_aliased_literal_dynamic_import_is_treated_as_live(
+    tmp_path: Path, loader: str
+) -> None:
+    write_project(
+        tmp_path,
+        {
+            "app.py": f"{loader}\n\nif __name__ == '__main__':\n    pass",
+            "parser_old.py": "def parse(value):\n    return value.strip()",
+            "parser.py": "def parse(value):\n    return value.strip()",
+        },
+    )
+
+    report = Analyzer(tmp_path).report("stale")
+
+    assert not any(finding.path == "parser_old.py" for finding in report.findings)
+
+
+def test_nonliteral_dynamic_discovery_disables_safe_deletion(tmp_path: Path) -> None:
+    executable = git_executable()
+    if executable is None:
+        pytest.skip("git is unavailable")
+    write_project(
+        tmp_path,
+        {
+            "app.py": "import parser_v2\n\nif __name__ == '__main__':\n    pass",
+            "loader.py": "import importlib\n\ndef load(name):\n    return importlib.import_module(name)",
+            "parser_v2.py": "def parse(value):\n    return value.strip()",
+        },
+    )
+    _git(executable, tmp_path, "init")
+    _git(executable, tmp_path, "config", "user.email", "tests@example.com")
+    _git(executable, tmp_path, "config", "user.name", "Repo Gardener Tests")
+    _git(executable, tmp_path, "add", ".")
+    _git(executable, tmp_path, "commit", "-m", "old parser")
+    write_project(
+        tmp_path,
+        {
+            "app.py": "import parser\n\nif __name__ == '__main__':\n    pass",
+            "parser.py": "def parse(value):\n    return value.strip()",
+        },
+    )
+    _git(executable, tmp_path, "add", ".")
+    _git(executable, tmp_path, "commit", "-m", "new parser")
+
+    finding = next(
+        item
+        for item in Analyzer(tmp_path).report("diff", "HEAD~1").findings
+        if item.path == "parser_v2.py"
+    )
+
+    assert finding.risk == 1.0
+    assert finding.recommendation == "review"
+    assert any("opaque_dynamic_module_discovery" in risk for risk in finding.risks)
+
+
+def test_packaging_plugin_entrypoint_is_a_graph_root(tmp_path: Path) -> None:
+    write_project(
+        tmp_path,
+        {
+            "pyproject.toml": """
+[project]
+name = "demo"
+version = "0.1.0"
+
+[project.entry-points."demo.plugins"]
+legacy = "plugin_old:run"
+""",
+            "app.py": "import plugin\n\nif __name__ == '__main__':\n    pass",
+            "plugin.py": "def run():\n    return True",
+            "plugin_old.py": "def run():\n    return True",
+        },
+    )
+
+    analyzer = Analyzer(tmp_path)
+
+    assert "plugin_old" in analyzer.graph.roots
+    assert not any(
+        finding.path == "plugin_old.py" for finding in analyzer.report("stale").findings
+    )
+
+
 def test_src_prefix_import_resolves_to_installed_module(tmp_path: Path) -> None:
     write_project(
         tmp_path,
@@ -113,6 +202,52 @@ def test_diff_merges_committed_worktree_and_untracked_paths(tmp_path: Path) -> N
 
     assert paths == {"app.py", "parser.py"}
     assert report.metrics["changed_files"] == 2
+
+
+def test_uncommitted_replacement_is_detected_and_dirty_candidate_is_not_safe(
+    tmp_path: Path,
+) -> None:
+    executable = git_executable()
+    if executable is None:
+        pytest.skip("git is unavailable")
+    write_project(
+        tmp_path,
+        {
+            "app.py": "import parser_v2\n\nif __name__ == '__main__':\n    pass",
+            "parser_v2.py": "def parse(value):\n    return value.strip()",
+        },
+    )
+    _git(executable, tmp_path, "init")
+    _git(executable, tmp_path, "config", "user.email", "tests@example.com")
+    _git(executable, tmp_path, "config", "user.name", "Repo Gardener Tests")
+    _git(executable, tmp_path, "add", ".")
+    _git(executable, tmp_path, "commit", "-m", "baseline")
+    write_project(
+        tmp_path,
+        {
+            "app.py": "import parser\n\nif __name__ == '__main__':\n    pass",
+            "parser.py": "def parse(value):\n    return value.strip()",
+        },
+    )
+
+    initial = next(
+        item
+        for item in Analyzer(tmp_path).report("diff", "HEAD").findings
+        if item.path == "parser_v2.py"
+    )
+    assert initial.recommendation == "safe_delete_candidate"
+
+    write_project(
+        tmp_path,
+        {"parser_v2.py": "def parse(value):\n    return value.strip().upper()"},
+    )
+    dirty = next(
+        item
+        for item in Analyzer(tmp_path).report("diff", "HEAD").findings
+        if item.path == "parser_v2.py"
+    )
+    assert dirty.risk >= 0.75
+    assert dirty.recommendation == "review"
 
 
 def test_changed_unreachable_file_without_replacement_is_review_only(
@@ -255,7 +390,9 @@ def test_src_layout_delete_risk_can_be_explicitly_overridden(tmp_path: Path) -> 
     write_project(
         tmp_path,
         {
-            "repo-gardener.toml": "[safety]\nallow_delete_src = true",
+            "repo-gardener.toml": (
+                "[safety]\nallow_delete_src = true\nallow_delete_package_modules = true"
+            ),
             "src/example/__init__.py": "from .parser import parse",
             "src/example/parser.py": "def parse(value):\n    return value.strip()",
             "src/example/parser_old.py": "def parse(value):\n    return value.strip()",
@@ -268,6 +405,65 @@ def test_src_layout_delete_risk_can_be_explicitly_overridden(tmp_path: Path) -> 
         finding for finding in report.findings if finding.path.endswith("parser_old.py")
     )
     assert finding.risk == 0.0
+
+
+def test_non_src_package_module_has_external_api_risk(tmp_path: Path) -> None:
+    write_project(
+        tmp_path,
+        {
+            "package/__init__.py": "from .parser import parse",
+            "package/parser.py": "def parse(value):\n    return value.strip()",
+            "package/parser_old.py": "def parse(value):\n    return value.strip()",
+        },
+    )
+
+    finding = next(
+        item
+        for item in Analyzer(tmp_path).report("stale").findings
+        if item.path == "package/parser_old.py"
+    )
+
+    assert finding.risk >= 0.45
+    assert finding.recommendation == "review"
+
+
+def test_relative_package_import_migration_is_resolved(tmp_path: Path) -> None:
+    executable = git_executable()
+    if executable is None:
+        pytest.skip("git is unavailable")
+    write_project(
+        tmp_path,
+        {
+            "repo-gardener.toml": (
+                "[safety]\nallow_delete_src = true\nallow_delete_package_modules = true"
+            ),
+            "src/pkg/__init__.py": "from .parser_v2 import parse",
+            "src/pkg/parser_v2.py": "def parse(value):\n    return value.strip()",
+        },
+    )
+    _git(executable, tmp_path, "init")
+    _git(executable, tmp_path, "config", "user.email", "tests@example.com")
+    _git(executable, tmp_path, "config", "user.name", "Repo Gardener Tests")
+    _git(executable, tmp_path, "add", ".")
+    _git(executable, tmp_path, "commit", "-m", "old parser")
+    write_project(
+        tmp_path,
+        {
+            "src/pkg/__init__.py": "from .parser import parse",
+            "src/pkg/parser.py": "def parse(value):\n    return value.strip()",
+        },
+    )
+    _git(executable, tmp_path, "add", ".")
+    _git(executable, tmp_path, "commit", "-m", "new parser")
+
+    finding = next(
+        item
+        for item in Analyzer(tmp_path).report("diff", "HEAD~1").findings
+        if item.path.endswith("parser_v2.py")
+    )
+
+    assert finding.recommendation == "safe_delete_candidate"
+    assert any(item["type"] == "call_site_migration" for item in finding.evidence)
 
 
 def test_config_entrypoint_accepts_object_suffix(tmp_path: Path) -> None:

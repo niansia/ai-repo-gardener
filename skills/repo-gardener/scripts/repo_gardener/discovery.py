@@ -166,11 +166,24 @@ def configured_entrypoint_modules(root: Path, config: Config) -> set[str]:
         try:
             with pyproject.open("rb") as handle:
                 raw = tomllib.load(handle)
-            scripts = raw.get("project", {}).get("scripts", {})
-            for value in scripts.values():
-                module = str(value).split(":", 1)[0].strip()
-                if module:
-                    modules.add(module)
+            project = raw.get("project", {})
+            if not isinstance(project, dict):
+                return modules
+            entry_points = project.get("entry-points", {})
+            entrypoint_tables = [
+                project.get("scripts", {}),
+                project.get("gui-scripts", {}),
+                *(entry_points.values() if isinstance(entry_points, dict) else ()),
+            ]
+            for table in entrypoint_tables:
+                if not isinstance(table, dict):
+                    continue
+                for value in table.values():
+                    if not isinstance(value, str):
+                        continue
+                    module = value.split(":", 1)[0].strip()
+                    if module:
+                        modules.add(module)
         except (OSError, tomllib.TOMLDecodeError):
             pass
     return modules

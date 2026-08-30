@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .analysis import Analyzer
 from .fixes import FixError, apply_deletions, restore_last, safe_candidates
-from .reporting import render_fix_plan, render_json, render_pretty
+from .reporting import render_fix_json, render_fix_plan, render_json, render_pretty
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -28,7 +28,7 @@ def build_parser() -> argparse.ArgumentParser:
         if command == "diff":
             subparser.add_argument(
                 "--base",
-                required=True,
+                default="HEAD",
                 help="Git ref that predates the agent iteration",
             )
         if command in {"scan", "diff"}:
@@ -54,7 +54,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     mode = fix.add_mutually_exclusive_group()
     mode.add_argument(
-        "--apply", action="store_true", help="Apply the reviewed safe deletion plan"
+        "--apply",
+        action="store_true",
+        help="EXPERIMENTAL: apply the reviewed safe deletion plan",
     )
     mode.add_argument(
         "--dry-run", action="store_true", help="Preview only (the default)"
@@ -74,6 +76,12 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="COMMAND",
         help="Validation command; repeatable",
     )
+    fix.add_argument("--format", choices=("pretty", "json"), default="pretty")
+    fix.add_argument(
+        "--trust-repo-config",
+        action="store_true",
+        help="Allow validation commands read from the target repository config",
+    )
     return parser
 
 
@@ -83,6 +91,11 @@ def _analysis_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--format", choices=("pretty", "json"), default="pretty")
     parser.add_argument(
         "--confidence", choices=("high", "medium", "all"), default="medium"
+    )
+    parser.add_argument(
+        "--fail-on",
+        choices=("high", "medium", "any"),
+        help="Exit 1 when a finding reaches this confidence tier",
     )
 
 
@@ -120,15 +133,33 @@ def _run_fix(analyzer: Analyzer, root: Path, args: argparse.Namespace) -> int:
     except ValueError as exc:
         return _error(str(exc))
     candidates = safe_candidates(report.findings)
-    print(render_fix_plan(candidates, str(root), args.apply))
+    if args.format == "pretty":
+        print(render_fix_plan(candidates, str(root), args.apply))
+        if analyzer.config.validation_commands and not args.trust_repo_config:
+            print(
+                "\nRepository-configured validation commands are ignored unless "
+                "--trust-repo-config is supplied."
+            )
     if not args.apply or not candidates:
+        if args.format == "json":
+            print(render_fix_json(candidates, str(root), args.apply, args.base))
         return 0
-    commands = [*analyzer.config.validation_commands, *args.validate]
+    commands = list(args.validate)
+    if args.trust_repo_config:
+        commands = [*analyzer.config.validation_commands, *commands]
+    elif analyzer.config.validation_commands and not commands:
+        return _error(
+            "repository-configured validation commands are untrusted; pass explicit "
+            "--validate commands or knowingly opt in with --trust-repo-config"
+        )
     try:
         manifest = apply_deletions(root, candidates, commands)
     except (FixError, OSError) as exc:
         return _error(str(exc))
-    print(f"\nApplied operation {manifest['operation_id']}; validation passed.")
+    if args.format == "json":
+        print(render_fix_json(candidates, str(root), True, args.base, manifest))
+    else:
+        print(f"\nApplied operation {manifest['operation_id']}; validation passed.")
     return 0
 
 
@@ -154,7 +185,13 @@ def _run_analysis(analyzer: Analyzer, args: argparse.Namespace) -> int:
         else render_pretty(report, args.confidence)
     )
     print(output)
-    return 0
+    minimum = {"high": 0.85, "medium": 0.65, "any": 0.0}.get(args.fail_on)
+    return (
+        1
+        if minimum is not None
+        and any(finding.confidence >= minimum for finding in report.findings)
+        else 0
+    )
 
 
 def _error(message: str) -> int:

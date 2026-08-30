@@ -83,6 +83,7 @@ class FileRecord:
     imports: list[ImportRef] = field(default_factory=list)
     symbols: set[str] = field(default_factory=set)
     dynamic_refs: set[str] = field(default_factory=set)
+    opaque_dynamic_discovery: bool = False
     vocabulary: set[str] = field(default_factory=set)
     structural_tokens: tuple[str, ...] = ()
     normalized_tokens: tuple[str, ...] = ()

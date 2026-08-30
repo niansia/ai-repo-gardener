@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import ast
 import io
 import os
 import shutil
@@ -9,7 +8,9 @@ import tarfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from .discovery import module_names
 from .models import FileRecord
+from .parsing import import_modules
 
 
 @dataclass(frozen=True)
@@ -89,8 +90,10 @@ def import_migrations(
         if before is None:
             continue
         after = by_path.get(relative_path).source if relative_path in by_path else ""
-        previous_imports = _import_modules(before)
-        current_imports = _import_modules(after)
+        module = module_names(root, root / relative_path)[0]
+        is_package = Path(relative_path).name == "__init__.py"
+        previous_imports = import_modules(before, module, is_package)
+        current_imports = import_modules(after, module, is_package)
         removed = previous_imports - current_imports
         added = current_imports - previous_imports
         if removed or added:
@@ -105,11 +108,16 @@ def import_migrations(
 
 
 def resolve_commit(root: Path, value: str) -> str | None:
-    direct = _run(root, ["rev-parse", "--verify", f"{value}^{{commit}}"])
+    direct = resolve_git_ref(root, value)
     if direct and direct.strip():
-        return direct.splitlines()[0].strip()
+        return direct
     before = _run(root, ["rev-list", "-1", f"--before={value}", "HEAD"])
     return before.splitlines()[0].strip() if before and before.strip() else None
+
+
+def resolve_git_ref(root: Path, value: str) -> str | None:
+    direct = _run(root, ["rev-parse", "--verify", f"{value}^{{commit}}"])
+    return direct.splitlines()[0].strip() if direct and direct.strip() else None
 
 
 def python_sources_at_commit(root: Path, commit: str) -> dict[str, str]:
@@ -138,20 +146,6 @@ def python_sources_at_commit(root: Path, commit: str) -> dict[str, str]:
     except tarfile.TarError:
         return {}
     return dict(sorted(sources.items()))
-
-
-def _import_modules(source: str) -> set[str]:
-    try:
-        tree = ast.parse(source)
-    except SyntaxError:
-        return set()
-    result: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            result.update(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            result.add(node.module)
-    return result
 
 
 def _run(root: Path, arguments: list[str]) -> str | None:

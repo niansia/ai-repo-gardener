@@ -17,6 +17,7 @@ from ..git_support import (
     is_git_repository,
     python_sources_at_commit,
     resolve_commit,
+    resolve_git_ref,
 )
 from ..graph import ModuleGraph
 from ..models import FileRecord, Finding, Report
@@ -56,7 +57,7 @@ class Analyzer:
         repository_has_git = is_git_repository(self.root)
         if base and not repository_has_git:
             raise ValueError("--base requires a Git repository")
-        if base and resolve_commit(self.root, base) is None:
+        if base and resolve_git_ref(self.root, base) is None:
             raise ValueError(f"Git base cannot be resolved: {base}")
         git_available = bool(base) and repository_has_git
         migrations = (

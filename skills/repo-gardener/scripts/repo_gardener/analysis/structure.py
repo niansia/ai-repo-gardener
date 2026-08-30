@@ -57,8 +57,6 @@ def _directory_finding(
         if len(cluster["files"]) <= max(3, int(len(records) * 0.60))
     ]
     has_partition = len(credible_clusters) >= 2
-    if not has_partition and not generic:
-        return None
     excess = len(records) - config.flat_directory_threshold + 1
     confidence = (
         min(0.90, 0.60 + excess * 0.02 + len(credible_clusters) * 0.025)

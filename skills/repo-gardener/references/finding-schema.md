@@ -27,3 +27,8 @@ historical style peers. `metrics.experimental_analysis` records whether
 structure/style were added to a `scan` or `diff` run.
 
 Finding IDs are derived from the rule, normalized path, replacement, and evidence fingerprint. Do not assume IDs survive a schema-version change.
+
+`fix --format json` emits a deterministic `plan_id`, `base`, and deletion
+operations with candidate and replacement SHA-256 values. The apply path
+revalidates those hashes before deletion. This is a machine-readable preview,
+not permission to mutate the repository.

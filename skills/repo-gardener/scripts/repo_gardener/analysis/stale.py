@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter, defaultdict
+from hashlib import sha256
 from pathlib import Path
 
 from ..config import Config
@@ -80,6 +81,7 @@ def stale_findings(
                 config,
                 root,
                 migrations,
+                candidate.relative_path in (changed or set()),
             )
         )
     return findings
@@ -127,12 +129,16 @@ def _build_finding(
     config: Config,
     root: Path,
     migrations: list[ImportMigration],
+    candidate_changed: bool,
 ) -> Finding:
     inbound = graph.inbound_count(candidate.module)
     naming = _canonical_stem(candidate.path.stem) == _canonical_stem(
         replacement.path.stem
     )
     risk, risks = _risk(candidate, records, config)
+    if candidate_changed:
+        risk = max(risk, 0.75)
+        risks.append("candidate_changed_in_iteration")
     uncovered_symbols = sorted(candidate.symbols - replacement.symbols)
     if uncovered_symbols:
         risk = max(risk, 0.55)
@@ -173,6 +179,12 @@ def _build_finding(
         inbound,
         naming,
         uncovered_symbols,
+    )
+    evidence.extend(
+        [
+            {"type": "candidate_sha256", "value": _file_hash(candidate.path)},
+            {"type": "replacement_sha256", "value": _file_hash(replacement.path)},
+        ]
     )
     recommendation = (
         "safe_delete_candidate" if confidence >= 0.85 and risk <= 0.20 else "review"
@@ -282,9 +294,20 @@ def _risk(
     if record.declares_public_api:
         risk = max(risk, 0.45)
         risks.append("public_api_or_package_init")
+    elif (
+        _is_package_module(record, records) and not config.allow_delete_package_modules
+    ):
+        risk = max(risk, 0.45)
+        risks.append("possible_external_package_module")
     elif record.relative_path.startswith("src/") and not config.allow_delete_src:
         risk = max(risk, 0.25)
         risks.append("possible_external_package_module")
+    opaque_users = sorted(
+        user.relative_path for user in records if user.opaque_dynamic_discovery
+    )
+    if opaque_users:
+        risk = 1.0
+        risks.append("opaque_dynamic_module_discovery:" + ",".join(opaque_users[:3]))
     dynamic_users = [
         user.relative_path
         for user in records
@@ -300,6 +323,23 @@ def _risk(
         risk = max(risk, 0.75)
         risks.append("dynamic_reference:" + ",".join(sorted(dynamic_users)[:3]))
     return risk, risks
+
+
+def _is_package_module(record: FileRecord, records: list[FileRecord]) -> bool:
+    package_directories = {
+        Path(item.relative_path).parent
+        for item in records
+        if item.path.name == "__init__.py"
+    }
+    parent = Path(record.relative_path).parent
+    return any(
+        directory == parent or directory in parent.parents
+        for directory in package_directories
+    )
+
+
+def _file_hash(path: Path) -> str:
+    return sha256(path.read_bytes()).hexdigest()
 
 
 def _call_site_migration(
