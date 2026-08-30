@@ -92,6 +92,7 @@ class FileRecord:
     framework_entrypoints: tuple[str, ...] = ()
     declares_public_api: bool = False
     possible_package_module: bool = False
+    packaged_public_module: bool = False
     packaging_uncertainty: tuple[str, ...] = ()
     runtime_string_refs: set[str] = field(default_factory=set)
     parse_error: str | None = None

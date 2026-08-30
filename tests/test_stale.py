@@ -153,6 +153,38 @@ def test_runpy_and_module_shaped_registry_strings_keep_modules_live(
         ),
         "import pkgutil\nPLUGINS = list(pkgutil.iter_modules())",
         "from pkgutil import walk_packages as scan\nPLUGINS = list(scan())",
+        (
+            "import importlib\nil = importlib\nil2 = il\n\n"
+            "def load(name):\n    return il2.import_module(name)"
+        ),
+        (
+            "import builtins\nb = builtins\nb2 = b\nloader = b2.__import__\n\n"
+            "def load(name):\n    return loader(name)"
+        ),
+        ("from importlib import import_module\nLOADERS = {'python': import_module}"),
+        "from importlib import import_module\nLOADERS = [import_module]",
+        (
+            "from importlib import import_module\n\n"
+            "def register(loader):\n    return loader\n\n"
+            "LOADER = register(import_module)"
+        ),
+        (
+            "from pkg_resources import iter_entry_points as iep\n"
+            "PLUGINS = list(iep('demo.plugins'))"
+        ),
+        ("import runpy\n\ndef load(path):\n    return runpy.run_path(path)"),
+        (
+            "import importlib.util as util\n\ndef load(name, path):\n"
+            "    return util.spec_from_file_location(name, path)"
+        ),
+        (
+            "from importlib.machinery import SourceFileLoader\n\n"
+            "def load(name, path):\n    return SourceFileLoader(name, path)"
+        ),
+        (
+            "from importlib.machinery import SourcelessFileLoader as Loader\n\n"
+            "def load(name, path):\n    return Loader(name, path)"
+        ),
     ],
 )
 def test_opaque_runtime_discovery_disables_safe_deletion(
@@ -414,6 +446,92 @@ def test_setup_function_alias_entrypoint_is_a_graph_root(tmp_path: Path) -> None
     assert not any(
         finding.path == "plugin_old.py" for finding in analyzer.report("stale").findings
     )
+
+
+@pytest.mark.parametrize(
+    ("metadata_name", "metadata_source"),
+    [
+        (
+            "pyproject.toml",
+            '[tool.setuptools]\npy-modules = ["plugin_old", "plugin"]',
+        ),
+        (
+            "setup.cfg",
+            "[options]\npy_modules =\n    plugin_old\n    plugin",
+        ),
+        (
+            "setup.py",
+            (
+                "from setuptools import setup\n"
+                "MODULES = ['plugin_old', 'plugin']\n"
+                "setup(py_modules=MODULES)"
+            ),
+        ),
+    ],
+)
+def test_packaged_public_module_is_never_an_automatic_deletion(
+    tmp_path: Path, metadata_name: str, metadata_source: str
+) -> None:
+    executable = git_executable()
+    if executable is None:
+        pytest.skip("git is unavailable")
+    write_project(
+        tmp_path,
+        {
+            metadata_name: metadata_source,
+            "app.py": "import plugin_old\n\nif __name__ == '__main__':\n    pass",
+            "plugin_old.py": "def run():\n    return True",
+        },
+    )
+    _git(executable, tmp_path, "init")
+    _git(executable, tmp_path, "config", "user.email", "tests@example.com")
+    _git(executable, tmp_path, "config", "user.name", "Repo Gardener Tests")
+    _git(executable, tmp_path, "add", ".")
+    _git(executable, tmp_path, "commit", "-m", "old plugin")
+    write_project(
+        tmp_path,
+        {
+            "app.py": "import plugin\n\nif __name__ == '__main__':\n    pass",
+            "plugin.py": "def run():\n    return True",
+        },
+    )
+    _git(executable, tmp_path, "add", ".")
+    _git(executable, tmp_path, "commit", "-m", "replace plugin")
+
+    analyzer = Analyzer(tmp_path)
+    finding = next(
+        item
+        for item in analyzer.report("diff", "HEAD~1").findings
+        if item.path == "plugin_old.py"
+    )
+
+    assert "plugin_old" not in analyzer.graph.roots
+    assert finding.confidence >= 0.85
+    assert finding.risk == 1.0
+    assert finding.recommendation == "review"
+    assert "packaged_public_module" in finding.risks
+
+
+def test_nonliteral_setup_py_modules_disables_safe_deletion(tmp_path: Path) -> None:
+    write_project(
+        tmp_path,
+        {
+            "setup.py": "from setuptools import setup\nsetup(py_modules=PY_MODULES)",
+            "app.py": "import parser\n\nif __name__ == '__main__':\n    pass",
+            "parser.py": "def parse(value):\n    return value.strip()",
+            "parser_old.py": "def parse(value):\n    return value.strip()",
+        },
+    )
+
+    finding = next(
+        item
+        for item in Analyzer(tmp_path).report("stale").findings
+        if item.path == "parser_old.py"
+    )
+
+    assert finding.risk == 1.0
+    assert finding.recommendation == "review"
+    assert any("nonliteral-py-modules" in risk for risk in finding.risks)
 
 
 def test_pep420_namespace_package_has_external_api_risk(tmp_path: Path) -> None:

@@ -3,7 +3,7 @@
 **Find files the AI forgot to delete.**
 
 Repo Gardener is a deterministic garbage collector for AI-edited Python
-repositories. Version `0.1.0a2` focuses on one job: finding superseded iteration files
+repositories. Version `0.1.0a3` focuses on one job: finding superseded iteration files
 and newly-created orphan files without turning weak guesses into deletions.
 
 ![Repo Gardener diff and safe dry-run demo](docs/demo.gif)
@@ -39,9 +39,11 @@ committed range.
 - Worktree, staged, committed-range, and untracked changes in `diff` mode.
 - Built-in entrypoint recognition for FastAPI, Flask, Django, Click, and Typer.
 - Alias-propagating runtime reference detection for `importlib`, `runpy`,
-  module-shaped strings, and opaque dynamic discovery.
+  `builtins`, `pkgutil`, `pkg_resources`, file-path loaders, module-shaped
+  strings, and escaped dynamic-loader callables.
 - Python packaging roots from `pyproject.toml`, `setup.cfg`, and literal
-  `setup.py` entry points; unresolved legacy metadata disables auto-delete.
+  `setup.py` entry points. Setuptools `py_modules` declarations are protected
+  as public distribution APIs; unresolved legacy metadata disables auto-delete.
 - Stable versioned JSON for agents and CI.
 - Python standard library only at runtime; no model call, account, telemetry,
   API key, or network access.
@@ -63,7 +65,7 @@ Applying a deletion requires the exact JSON plan that was reviewed:
 
 ```bash
 repo-gardener fix /path/to/project --dry-run --format json > reviewed-plan.json
-repo-gardener fix /path/to/project --apply --plan reviewed-plan.json --validate "python -m pytest"
+repo-gardener fix /path/to/project --apply --plan reviewed-plan.json --validate "python -m pytest" --validation-timeout 300
 ```
 
 The plan pins the base ref and SHA, HEAD SHA, effective configuration hash,
@@ -89,7 +91,7 @@ follows the open [Agent Skills specification](https://agentskills.io/specificati
 | `diff [--base <ref>]` | Audit committed, worktree, staged, and untracked iteration changes; base defaults to `HEAD` | Never |
 | `fix [--base <ref>] --dry-run` | Preview matching high-confidence deletions; base defaults to `HEAD` | Never |
 | `fix [--base <ref>] --dry-run --format json` | Emit the reviewed plan contract | Never |
-| `fix --apply --plan <json> --validate <cmd>` | Experimental: apply exactly the reviewed plan, validate, and restore deleted files on failure/interruption | Yes |
+| `fix --apply --plan <json> --validate <cmd> [--validation-timeout <seconds>]` | Experimental: apply exactly the reviewed plan, validate, and restore deleted files on failure, timeout, or interruption | Yes |
 | `fix --restore` | Restore the latest operation | Yes |
 | `structure` | Run experimental directory analysis explicitly | Never |
 | `style --baseline <ref-or-date>` | Run experimental repo-relative Python style analysis | Never |
@@ -132,8 +134,16 @@ automatic deletion candidates.
 Any Python parse error disables automatic deletion across the repository while
 still allowing review findings. The same veto applies to opaque runtime loading,
 including `eval`/`exec`, reflected import callables, non-literal imports, and
-`pkgutil` module discovery. Literal module-shaped strings raise risk only when
-they resolve to a module that exists in the repository.
+`pkgutil`/`pkg_resources` module discovery. The veto also covers loaders stored
+in containers or passed as values, plus `runpy.run_path`,
+`spec_from_file_location`, and importlib file loaders. Literal module-shaped
+strings raise risk only when they resolve to a module that exists in the
+repository.
+
+Setuptools modules declared through `py-modules`/`py_modules` remain visible as
+review findings but can never pass the automatic-deletion gate. Configuration
+types are strict: quoted booleans such as `allow_delete_src = "false"` are an
+error, not a truthy safety override.
 
 ### What the default package protection means
 
@@ -166,7 +176,9 @@ a public or plugin-facing API.
 Validation commands read from the target repository are untrusted and ignored
 by default. Prefer explicit `--validate` arguments. `--trust-repo-config` is an
 opt-in to execute commands supplied by that repository and should only be used
-after review.
+after review. Each validation command has a 300-second default timeout; set a
+different positive limit with `--validation-timeout`. Timeout is treated as a
+validation failure and restores the deleted candidates.
 
 Applied fixes store recoverable snapshots under `.repo-gardener/`. Add this
 line to the target repository's `.gitignore`:
@@ -194,8 +206,8 @@ recorded in [`benchmarks/safety-benchmark.md`](benchmarks/safety-benchmark.md);
 it reports eligible-deletion false positives rather than claiming population
 precision.
 
-Alpha validation commands do not yet have a built-in timeout. Repository safety
-overrides are also honored during analysis without `--trust-repo-config` (that
+Repository safety overrides are honored during analysis without
+`--trust-repo-config` (that
 flag controls validation-command execution only), so review the repository
 config before authorizing apply. The plan pins its effective configuration hash.
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from math import isfinite
 from pathlib import Path
 
 from . import __version__
@@ -9,6 +10,16 @@ from .analysis import Analyzer
 from .fixes import FixError, apply_deletions, restore_last, safe_candidates
 from .plans import build_plan, load_reviewed_plan, require_matching_plan
 from .reporting import render_fix_json, render_fix_plan, render_json, render_pretty
+
+
+def _positive_seconds(value: str) -> float:
+    try:
+        seconds = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a number") from exc
+    if not isfinite(seconds) or seconds <= 0:
+        raise argparse.ArgumentTypeError("must be greater than zero")
+    return seconds
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -79,6 +90,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         metavar="COMMAND",
         help="Validation command; repeatable",
+    )
+    fix.add_argument(
+        "--validation-timeout",
+        type=_positive_seconds,
+        default=300.0,
+        metavar="SECONDS",
+        help="Timeout for each validation command (default: 300)",
     )
     fix.add_argument("--format", choices=("pretty", "json"), default="pretty")
     fix.add_argument(
@@ -192,7 +210,13 @@ def _run_fix(analyzer: Analyzer, root: Path, args: argparse.Namespace) -> int:
             "--validate commands or knowingly opt in with --trust-repo-config"
         )
     try:
-        manifest = apply_deletions(root, candidates, commands, reviewed)
+        manifest = apply_deletions(
+            root,
+            candidates,
+            commands,
+            reviewed,
+            args.validation_timeout,
+        )
     except (FixError, OSError) as exc:
         return _error(str(exc))
     if args.format == "json":

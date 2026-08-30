@@ -35,6 +35,9 @@ class Analyzer:
         entrypoint_modules = set(packaging.entrypoint_modules)
         self.records = self._load_records(entrypoint_modules)
         for record in self.records:
+            record.packaged_public_module = bool(
+                {record.module, *record.module_aliases} & packaging.public_modules
+            )
             record.possible_package_module = packaging.is_namespace_module(
                 self.root, record.relative_path
             )

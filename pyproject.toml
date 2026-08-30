@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "repo-gardener"
-version = "0.1.0a2"
+version = "0.1.0a3"
 description = "Evidence-backed garbage collection for AI-edited Python repositories"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -17,6 +17,8 @@ classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Topic :: Software Development :: Quality Assurance",
 ]
 dependencies = []

@@ -91,6 +91,39 @@ def test_keyboard_interrupt_during_validation_restores_deleted_file(
     assert (tmp_path / "parser_old.py").read_text(encoding="utf-8") == source
 
 
+def test_validation_timeout_restores_deleted_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = "def parse(value):\n    return value.strip()\n"
+    write_project(tmp_path, {"parser_old.py": source})
+    finding = Finding(
+        rule="stale-file",
+        category="repo-gc",
+        severity="warning",
+        confidence=0.95,
+        risk=0.0,
+        path="parser_old.py",
+        replacement="parser.py",
+        recommendation="safe_delete_candidate",
+    ).finalize()
+
+    def time_out(command, **kwargs):
+        assert kwargs["timeout"] == 0.01
+        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+    monkeypatch.setattr(fixes_module.subprocess, "run", time_out)
+
+    with pytest.raises(FixError, match="restored.*timed out"):
+        apply_deletions(
+            tmp_path,
+            [finding],
+            ["test command"],
+            validation_timeout=0.01,
+        )
+
+    assert (tmp_path / "parser_old.py").read_text(encoding="utf-8") == source
+
+
 def test_apply_rejects_a_stale_content_hash(tmp_path: Path) -> None:
     write_project(
         tmp_path,

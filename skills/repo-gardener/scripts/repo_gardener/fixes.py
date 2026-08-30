@@ -5,6 +5,7 @@ import shutil
 import subprocess
 from datetime import UTC, datetime
 from hashlib import sha256
+from math import isfinite
 from pathlib import Path
 
 from .models import Finding
@@ -36,11 +37,14 @@ def apply_deletions(
     findings: list[Finding],
     validation_commands: list[str],
     reviewed_plan: dict[str, object] | None = None,
+    validation_timeout: float = 300.0,
 ) -> dict[str, object]:
     if not validation_commands:
         raise FixError(
             "--apply requires at least one --validate command or configured validation command"
         )
+    if not isfinite(validation_timeout) or validation_timeout <= 0:
+        raise FixError("validation timeout must be greater than zero")
     files = [_safe_target(root, finding.path) for finding in findings]
     if any(path.is_symlink() for path in files):
         raise FixError("refusing to delete symlink candidates")
@@ -66,6 +70,7 @@ def apply_deletions(
         "status": "pending",
         "files": [],
         "validation": validation_commands,
+        "validation_timeout_seconds": validation_timeout,
     }
     entries: list[dict[str, str]] = []
     for path in files:
@@ -84,14 +89,30 @@ def apply_deletions(
         for path in files:
             path.unlink()
         for command in validation_commands:
-            completed = subprocess.run(
-                command,
-                cwd=root,
-                shell=True,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
+            try:
+                completed = subprocess.run(
+                    command,
+                    cwd=root,
+                    shell=True,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                    timeout=validation_timeout,
+                )
+            except subprocess.TimeoutExpired as exc:
+                results.append(
+                    {
+                        "command": command,
+                        "timed_out": True,
+                        "timeout_seconds": validation_timeout,
+                        "stdout": str(exc.stdout or "")[-4000:],
+                        "stderr": str(exc.stderr or "")[-4000:],
+                    }
+                )
+                raise FixError(
+                    f"validation timed out after {validation_timeout:g} seconds: "
+                    f"{command}"
+                ) from exc
             results.append(
                 {
                     "command": command,

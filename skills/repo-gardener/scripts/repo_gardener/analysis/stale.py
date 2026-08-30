@@ -301,7 +301,10 @@ def _risk(
     if record.category in {"generated", "migration", "vendor"}:
         risk = 1.0
         risks.append(record.category)
-    if record.declares_public_api:
+    if record.packaged_public_module:
+        risk = 1.0
+        risks.append("packaged_public_module")
+    elif record.declares_public_api:
         risk = max(risk, 0.45)
         risks.append("public_api_or_package_init")
     elif (

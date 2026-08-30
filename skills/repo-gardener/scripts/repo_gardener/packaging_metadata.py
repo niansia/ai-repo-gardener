@@ -16,6 +16,7 @@ MODULE_NAME = re.compile(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*")
 @dataclass(frozen=True)
 class PackagingMetadata:
     entrypoint_modules: frozenset[str]
+    public_modules: frozenset[str]
     uncertainty_sources: tuple[str, ...]
     namespace_roots: tuple[str, ...]
 
@@ -52,11 +53,19 @@ def discover_packaging_metadata(root: Path, config: Config) -> PackagingMetadata
     }
     uncertainty: set[str] = set()
     namespace_roots: set[str] = set()
-    _read_pyproject(root / "pyproject.toml", modules, uncertainty, namespace_roots)
-    _read_setup_cfg(root / "setup.cfg", modules, uncertainty)
-    _read_setup_py(root / "setup.py", modules, uncertainty)
+    public_modules: set[str] = set()
+    _read_pyproject(
+        root / "pyproject.toml",
+        modules,
+        public_modules,
+        uncertainty,
+        namespace_roots,
+    )
+    _read_setup_cfg(root / "setup.cfg", modules, public_modules, uncertainty)
+    _read_setup_py(root / "setup.py", modules, public_modules, uncertainty)
     return PackagingMetadata(
         entrypoint_modules=frozenset(modules),
+        public_modules=frozenset(public_modules),
         uncertainty_sources=tuple(sorted(uncertainty)),
         namespace_roots=tuple(sorted(namespace_roots)),
     )
@@ -65,6 +74,7 @@ def discover_packaging_metadata(root: Path, config: Config) -> PackagingMetadata
 def _read_pyproject(
     path: Path,
     modules: set[str],
+    public_modules: set[str],
     uncertainty: set[str],
     namespace_roots: set[str],
 ) -> None:
@@ -95,6 +105,12 @@ def _read_pyproject(
                     uncertainty.add("pyproject.toml:nonliteral-entry-point")
     tool = raw.get("tool", {})
     setuptools = tool.get("setuptools", {}) if isinstance(tool, dict) else {}
+    if (
+        isinstance(setuptools, dict)
+        and "py-modules" in setuptools
+        and not _collect_public_modules(setuptools["py-modules"], public_modules)
+    ):
+        uncertainty.add("pyproject.toml:invalid-py-modules")
     packages = setuptools.get("packages", {}) if isinstance(setuptools, dict) else {}
     find = packages.get("find", {}) if isinstance(packages, dict) else {}
     if isinstance(find, dict) and find.get("namespaces") is True:
@@ -110,7 +126,12 @@ def _read_pyproject(
             uncertainty.add("pyproject.toml:namespace-root")
 
 
-def _read_setup_cfg(path: Path, modules: set[str], uncertainty: set[str]) -> None:
+def _read_setup_cfg(
+    path: Path,
+    modules: set[str],
+    public_modules: set[str],
+    uncertainty: set[str],
+) -> None:
     if not path.is_file():
         return
     parser = configparser.ConfigParser(interpolation=None, strict=False)
@@ -120,19 +141,34 @@ def _read_setup_cfg(path: Path, modules: set[str], uncertainty: set[str]) -> Non
     except (OSError, configparser.Error):
         uncertainty.add("setup.cfg:unreadable")
         return
-    if not parser.has_section("options.entry_points"):
-        return
-    for value in parser["options.entry_points"].values():
-        for line in value.splitlines():
-            stripped = line.strip()
-            if not stripped or stripped.startswith(("#", ";")):
-                continue
-            target = stripped.split("=", 1)[1].strip() if "=" in stripped else stripped
-            if not _add_object_reference(target, modules):
-                uncertainty.add("setup.cfg:nonliteral-entry-point")
+    if parser.has_section("options") and "py_modules" in parser["options"]:
+        values = [
+            item.strip()
+            for line in parser["options"]["py_modules"].splitlines()
+            for item in line.split(",")
+            if item.strip() and not item.lstrip().startswith(("#", ";"))
+        ]
+        if not _collect_public_modules(values, public_modules):
+            uncertainty.add("setup.cfg:invalid-py-modules")
+    if parser.has_section("options.entry_points"):
+        for value in parser["options.entry_points"].values():
+            for line in value.splitlines():
+                stripped = line.strip()
+                if not stripped or stripped.startswith(("#", ";")):
+                    continue
+                target = (
+                    stripped.split("=", 1)[1].strip() if "=" in stripped else stripped
+                )
+                if not _add_object_reference(target, modules):
+                    uncertainty.add("setup.cfg:nonliteral-entry-point")
 
 
-def _read_setup_py(path: Path, modules: set[str], uncertainty: set[str]) -> None:
+def _read_setup_py(
+    path: Path,
+    modules: set[str],
+    public_modules: set[str],
+    uncertainty: set[str],
+) -> None:
     if not path.is_file():
         return
     try:
@@ -154,6 +190,7 @@ def _read_setup_py(path: Path, modules: set[str], uncertainty: set[str]) -> None
         ):
             continue
         has_entry_points = False
+        has_py_modules = False
         for keyword in node.keywords:
             if keyword.arg == "entry_points":
                 has_entry_points = True
@@ -175,12 +212,34 @@ def _read_setup_py(path: Path, modules: set[str], uncertainty: set[str]) -> None
                     continue
                 if not _collect_entrypoint_value(literal, modules):
                     uncertainty.add("setup.py:nonliteral-entry-points")
+            elif keyword.arg == "py_modules":
+                has_py_modules = True
+                value = (
+                    assignments.get(keyword.value.id)
+                    if isinstance(keyword.value, ast.Name)
+                    else keyword.value
+                )
+                try:
+                    literal = ast.literal_eval(value) if value is not None else None
+                except (
+                    ValueError,
+                    TypeError,
+                    SyntaxError,
+                    MemoryError,
+                    RecursionError,
+                ):
+                    uncertainty.add("setup.py:nonliteral-py-modules")
+                    continue
+                if not _collect_public_modules(literal, public_modules):
+                    uncertainty.add("setup.py:nonliteral-py-modules")
             elif keyword.arg is None:
                 uncertainty.add("setup.py:expanded-keyword-metadata")
         if not has_entry_points and any(
             keyword.arg is None for keyword in node.keywords
         ):
             uncertainty.add("setup.py:entry-points-may-be-dynamic")
+        if not has_py_modules and any(keyword.arg is None for keyword in node.keywords):
+            uncertainty.add("setup.py:py-modules-may-be-dynamic")
 
 
 def _collect_entrypoint_value(value: Any, modules: set[str]) -> bool:
@@ -192,6 +251,15 @@ def _collect_entrypoint_value(value: Any, modules: set[str]) -> bool:
     if isinstance(value, (list, tuple, set)):
         return all(_collect_entrypoint_value(item, modules) for item in value)
     return False
+
+
+def _collect_public_modules(value: Any, modules: set[str]) -> bool:
+    if not isinstance(value, (list, tuple, set)):
+        return False
+    if not all(isinstance(item, str) and MODULE_NAME.fullmatch(item) for item in value):
+        return False
+    modules.update(value)
+    return True
 
 
 def _add_object_reference(value: str, modules: set[str]) -> bool:
