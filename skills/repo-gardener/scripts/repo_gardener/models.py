@@ -184,6 +184,7 @@ class FileRecord:
     possible_package_module: bool = False
     packaged_public_module: bool = False
     packaging_uncertainty: tuple[str, ...] = ()
+    deployment_uncertainty: tuple[str, ...] = ()
     runtime_string_refs: set[str] = field(default_factory=set)
     parse_error: str | None = None
     mtime: float = 0.0

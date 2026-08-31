@@ -28,13 +28,20 @@ IGNORED_DIRECTORIES = {
 
 
 def discover_python_files(root: Path, config: Config) -> list[Path]:
+    return [
+        path for path in discover_repository_files(root, config) if path.suffix == ".py"
+    ]
+
+
+def discover_repository_files(root: Path, config: Config) -> list[Path]:
+    """Return safe, non-ignored repository files without following symlinks."""
     root_resolved = root.resolve()
     candidates = _git_files(root)
     if candidates is None:
         candidates = _walk_files(root)
     result: list[Path] = []
     for path in candidates:
-        if path.suffix != ".py" or path.is_symlink() or not path.is_file():
+        if path.is_symlink() or not path.is_file():
             continue
         try:
             path.resolve().relative_to(root_resolved)

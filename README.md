@@ -1,13 +1,13 @@
 # AI Repo Gardener
 
 [![CI](https://github.com/niansia/ai-repo-gardener/actions/workflows/ci.yml/badge.svg)](https://github.com/niansia/ai-repo-gardener/actions/workflows/ci.yml)
-[![GitHub prerelease](https://img.shields.io/github/v/release/niansia/ai-repo-gardener?include_prereleases&label=release)](https://github.com/niansia/ai-repo-gardener/releases/tag/v0.1.0-alpha.10)
+[![GitHub prerelease](https://img.shields.io/github/v/release/niansia/ai-repo-gardener?include_prereleases&label=release)](https://github.com/niansia/ai-repo-gardener/releases/tag/v0.1.0-alpha.11)
 
 **Find files the AI forgot to delete.**
 
 AI Repo Gardener is a deterministic garbage collector for AI-edited Python
 repositories. The package, CLI, and portable Skill keep the concise
-`repo-gardener` identifier. Version `0.1.0a10` covers three evidence systems:
+`repo-gardener` identifier. Version `0.1.0a11` covers three evidence systems:
 repository garbage collection, folder-architecture pressure, and
 baseline-relative Python house-style drift. Weak guesses never become
 automatic deletions or automatic moves.
@@ -68,6 +68,11 @@ committed range.
   `import-names`/`import-namespaces` and setuptools `py_modules` declarations
   are protected as public distribution APIs; dynamic or unresolved metadata
   disables auto-delete.
+- Deployment and automation roots from Dockerfiles, Compose, Procfiles,
+  systemd units, GitHub Actions, Render, tox, and common Python application
+  commands such as `python -m`, Uvicorn/Gunicorn `module:app`, Celery `-A`,
+  Flask `--app`, and pytest `--pyargs`. Templated runtime module commands are
+  reported as uncertainty and disable automatic deletion repository-wide.
 - Stable versioned JSON for agents and CI.
 - Python runtime/tool entrypoints such as `sitecustomize.py`,
   `usercustomize.py`, `noxfile.py`, `fabfile.py`, `locustfile.py`, and
@@ -84,14 +89,16 @@ The symbol and dependency rules are deliberately conservative static evidence,
 not proof that a public API, plugin dependency, CLI tool, or reflective caller
 is unused.
 
-The published alpha.10 benchmark pins requests, Flask, pandas, Django, FastAPI,
+The published real-world benchmark pins requests, Flask, pandas, Django, FastAPI,
 pytest, and Pydantic and records cold/warm/diff/structure/style runs. No scan in
 that table produced an automatic-deletion candidate. Findings shown at
 `--confidence all` are broken down by rule so review-only tutorial and
 compatibility duplicates are not confused with deletion proposals. Exact
 commits, timings, and the machine-readable result are in
 [`benchmarks/real-world-smoke.md`](benchmarks/real-world-smoke.md); this is a
-smoke result, not a population-precision claim.
+smoke result, not a population-precision claim. A separate machine-readable
+20-repository-state labeled corpus reports safe-delete TP/FP/FN and is
+documented in [`benchmarks/labeled-corpus.md`](benchmarks/labeled-corpus.md).
 
 ## Try the alpha
 
@@ -102,7 +109,9 @@ Python 3.11 through 3.14. Platform support is claimed from hosted runs, not
 inferred from a single local machine.
 
 ```bash
-python -m pip install "https://github.com/niansia/ai-repo-gardener/releases/download/v0.1.0-alpha.10/repo_gardener-0.1.0a10-py3-none-any.whl"
+python -m pip install "repo-gardener==0.1.0a11"
+# Or run once without installing:
+uvx --from "repo-gardener==0.1.0a11" repo-gardener --version
 repo-gardener --version
 repo-gardener diff /path/to/project --base HEAD~1
 repo-gardener fix /path/to/project --base HEAD~1 --dry-run
@@ -283,11 +292,13 @@ and runtime-reference metadata. `metrics.parse_cache_hits` reports reuse. Set
 `REPO_GARDENER_CACHE_DIR` to choose a different parent directory. Source text
 is not stored in the cache, and changing file content invalidates the entry.
 
-The same build-once release candidate runs on pull requests, `main`, and manual
+The same build-once release candidate runs on every pull request, `main`, and manual
 dispatch without publishing. Tags reuse that pipeline: one wheel is built,
 installed and tested outside the source tree on all 12 OS/Python combinations,
 validated as a portable Skill, dogfooded, provenance-attested, attached to a
-draft prerelease, and published only after every gate passes. Third-party
+draft prerelease, published to PyPI through trusted publishing, and released
+only after every gate passes. A stable aggregate `release-candidate` status is
+required by the protected `main` ruleset. Third-party
 Actions are pinned to full commit SHAs. Weekly pinned-repository benchmarks
 publish their JSON result as a workflow artifact.
 
@@ -306,7 +317,9 @@ duplicate implementations, dependency leftovers, rename chronology, style
 support/baselines, co-change affinity, entropy, and move-plan examples. Public-repository
 smoke results and exact commit hashes are recorded in
 [`benchmarks/real-world-smoke.md`](benchmarks/real-world-smoke.md). That run is
-not a labeled precision benchmark. The separate adversarial safety gate is
+not a labeled precision benchmark. The curated labeled corpus and its explicit
+DELETE/KEEP/REVIEW ground truth are documented in
+[`benchmarks/labeled-corpus.md`](benchmarks/labeled-corpus.md). The separate adversarial safety gate is
 recorded in [`benchmarks/safety-benchmark.md`](benchmarks/safety-benchmark.md);
 it reports eligible-deletion false positives rather than claiming population
 precision.

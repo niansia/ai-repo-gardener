@@ -22,6 +22,9 @@ Read this before applying any cleanup.
 - Any candidate when `eval`/`exec`, reflected or escaped import loaders,
   `pkgutil`/`pkg_resources` discovery, or file-path loading makes runtime
   reachability opaque.
+- Any candidate when a deployment or automation command selects its Python
+  module through an environment variable or template that cannot be resolved
+  statically.
 - Modules declared as public setuptools `py_modules` distribution APIs.
 - Importable package modules unless the repository owner explicitly opts out of package API protection.
 

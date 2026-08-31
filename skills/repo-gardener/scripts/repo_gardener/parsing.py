@@ -910,9 +910,10 @@ def _normalized_tokens(source: str):
 
 def _style_metrics(tree: ast.Module, source: str) -> StyleMetrics:
     lines = source.splitlines()
+    nodes = list(ast.walk(tree))
     functions = [
         node
-        for node in ast.walk(tree)
+        for node in nodes
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
     ]
     function_lengths = [
@@ -927,7 +928,7 @@ def _style_metrics(tree: ast.Module, source: str) -> StyleMetrics:
     docstring_lines = 0
     for node in [
         *functions,
-        *(item for item in ast.walk(tree) if isinstance(item, ast.ClassDef)),
+        *(item for item in nodes if isinstance(item, ast.ClassDef)),
     ]:
         doc = ast.get_docstring(node, clean=False)
         if doc:
@@ -943,8 +944,13 @@ def _style_metrics(tree: ast.Module, source: str) -> StyleMetrics:
         pass
     names = Counter(
         node.id
-        for node in ast.walk(tree)
+        for node in nodes
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store)
+    )
+    loaded_names = Counter(
+        node.id
+        for node in nodes
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)
     )
     annotations = sum(
         1
@@ -962,7 +968,10 @@ def _style_metrics(tree: ast.Module, source: str) -> StyleMetrics:
         ]
         if annotation is not None
     )
-    annotation_nodes = _annotation_nodes(tree)
+    annotation_nodes = _annotation_nodes(nodes)
+    annotation_tree_nodes = [
+        node for annotation in annotation_nodes for node in ast.walk(annotation)
+    ]
     builtin_generics = {"dict", "frozenset", "list", "set", "tuple", "type"}
     legacy_generics = {
         "Dict",
@@ -981,31 +990,27 @@ def _style_metrics(tree: ast.Module, source: str) -> StyleMetrics:
     legacy_unions = {"Optional", "Union", "typing.Optional", "typing.Union"}
     builtin_generic_annotations = sum(
         1
-        for annotation in annotation_nodes
-        for node in ast.walk(annotation)
+        for node in annotation_tree_nodes
         if isinstance(node, ast.Subscript)
         and dotted_name(node.value) in builtin_generics
     )
     legacy_generic_annotations = sum(
         1
-        for annotation in annotation_nodes
-        for node in ast.walk(annotation)
+        for node in annotation_tree_nodes
         if isinstance(node, ast.Subscript)
         and dotted_name(node.value) in legacy_generics
     )
     pep604_unions = sum(
         1
-        for annotation in annotation_nodes
-        for node in ast.walk(annotation)
+        for node in annotation_tree_nodes
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr)
     )
     legacy_optional_unions = sum(
         1
-        for annotation in annotation_nodes
-        for node in ast.walk(annotation)
+        for node in annotation_tree_nodes
         if isinstance(node, ast.Subscript) and dotted_name(node.value) in legacy_unions
     )
-    calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
+    calls = [node for node in nodes if isinstance(node, ast.Call)]
     os_path_uses = sum(dotted_name(node.func).startswith("os.path.") for node in calls)
     pathlib_uses = sum(
         dotted_name(node.func) in {"Path", "pathlib.Path"} for node in calls
@@ -1023,11 +1028,9 @@ def _style_metrics(tree: ast.Module, source: str) -> StyleMetrics:
     logging_call_nodes = [node for node in calls if _is_logging_call(node)]
     comprehensions = sum(
         isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp))
-        for node in ast.walk(tree)
+        for node in nodes
     )
-    for_loops = sum(
-        isinstance(node, (ast.For, ast.AsyncFor)) for node in ast.walk(tree)
-    )
+    for_loops = sum(isinstance(node, (ast.For, ast.AsyncFor)) for node in nodes)
     structured_models = sum(
         _is_structured_model(node)
         for node in tree.body
@@ -1035,8 +1038,7 @@ def _style_metrics(tree: ast.Module, source: str) -> StyleMetrics:
     )
     bare_dict_annotations = sum(
         1
-        for annotation in annotation_nodes
-        for node in ast.walk(annotation)
+        for node in annotation_tree_nodes
         if isinstance(node, ast.Subscript)
         and dotted_name(node.value) in {"dict", "Dict", "typing.Dict"}
     )
@@ -1050,7 +1052,7 @@ def _style_metrics(tree: ast.Module, source: str) -> StyleMetrics:
         comments=len(comments),
         broad_exceptions=sum(
             1
-            for node in ast.walk(tree)
+            for node in nodes
             if isinstance(node, ast.ExceptHandler)
             and (
                 node.type is None
@@ -1062,12 +1064,12 @@ def _style_metrics(tree: ast.Module, source: str) -> StyleMetrics:
         ),
         print_calls=sum(
             1
-            for node in ast.walk(tree)
+            for node in nodes
             if isinstance(node, ast.Call) and dotted_name(node.func) == "print"
         ),
         nested_dicts=sum(
             1
-            for node in ast.walk(tree)
+            for node in nodes
             if isinstance(node, ast.Dict)
             and any(isinstance(value, ast.Dict) for value in node.values)
         ),
@@ -1101,19 +1103,19 @@ def _style_metrics(tree: ast.Module, source: str) -> StyleMetrics:
             bool(SNAKE_CASE_RE.fullmatch(node.name)) for node in functions
         ),
         function_name_words=sum(_name_word_count(node.name) for node in functions),
-        defensive_guards=sum(_is_defensive_guard(node) for node in ast.walk(tree)),
+        defensive_guards=sum(_is_defensive_guard(node) for node in nodes),
         single_use_tiny_helpers=sum(
             (node.end_lineno or node.lineno) - node.lineno + 1 <= 6
-            and _loaded_name_count(tree, node.name) <= 1
+            and loaded_names[node.name] <= 1
             for node in top_level_functions
         ),
         wrapper_functions=sum(_is_wrapper_function(node) for node in functions),
         log_then_reraise_handlers=sum(
             _logs_then_reraises(node)
-            for node in ast.walk(tree)
+            for node in nodes
             if isinstance(node, ast.ExceptHandler)
         ),
-        redundant_temp_returns=_redundant_temp_returns(tree),
+        redundant_temp_returns=_redundant_temp_returns(nodes),
         mapping_get_calls=sum(
             isinstance(node.func, ast.Attribute) and node.func.attr == "get"
             for node in calls
@@ -1128,9 +1130,9 @@ def _style_metrics(tree: ast.Module, source: str) -> StyleMetrics:
     )
 
 
-def _annotation_nodes(tree: ast.Module) -> list[ast.AST]:
+def _annotation_nodes(nodes: list[ast.AST]) -> list[ast.AST]:
     result: list[ast.AST] = []
-    for node in ast.walk(tree):
+    for node in nodes:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             result.extend(
                 annotation
@@ -1215,15 +1217,6 @@ def _is_defensive_guard(node: ast.AST) -> bool:
     )
 
 
-def _loaded_name_count(tree: ast.Module, name: str) -> int:
-    return sum(
-        isinstance(node, ast.Name)
-        and isinstance(node.ctx, ast.Load)
-        and node.id == name
-        for node in ast.walk(tree)
-    )
-
-
 def _is_wrapper_function(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
     body = list(node.body)
     if (
@@ -1250,9 +1243,9 @@ def _logs_then_reraises(node: ast.ExceptHandler) -> bool:
     )
 
 
-def _redundant_temp_returns(tree: ast.Module) -> int:
+def _redundant_temp_returns(nodes: list[ast.AST]) -> int:
     count = 0
-    for node in ast.walk(tree):
+    for node in nodes:
         for _, value in ast.iter_fields(node):
             if not isinstance(value, list):
                 continue

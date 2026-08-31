@@ -51,6 +51,14 @@ def render_pretty(report: Report, confidence: str) -> str:
             f"WARNING: {parse_errors} Python file(s) could not be parsed{paths}. "
             "Automatic deletion is disabled until the parse errors are resolved."
         )
+    deployment_uncertainty = data["metrics"].get("deployment_reference_uncertainty", [])
+    if isinstance(deployment_uncertainty, list) and deployment_uncertainty:
+        lines.append(
+            "WARNING: deployment configuration contains a dynamic runtime module "
+            "reference: "
+            + ", ".join(str(source) for source in deployment_uncertainty[:3])
+            + ". Automatic deletion is disabled until it is made explicit."
+        )
     lines.append("")
     if not data["findings"]:
         lines.append("No findings at the selected confidence level.")

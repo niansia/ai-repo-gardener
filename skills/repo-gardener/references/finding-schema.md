@@ -48,6 +48,13 @@ Cache identity includes relative parsing context, source content, Python
 version, and an automatically derived analysis ABI, allowing reuse across
 equivalent ephemeral worktrees without preserving stale analyzer results.
 
+`metrics.deployment_runtime_references` maps module spellings found in known
+deployment/automation files to their repository-relative evidence files.
+`metrics.deployment_reference_files` lists scanned deployment metadata, and
+`metrics.deployment_reference_uncertainty` lists templated, oversized, or
+unreadable runtime-command sources. Any nonempty uncertainty list disables
+automatic deletion repository-wide.
+
 Stale-file evidence may include
 `public_surface_missing_from_replacement` or
 `public_contract_changed_in_replacement`. The latter covers signatures,
