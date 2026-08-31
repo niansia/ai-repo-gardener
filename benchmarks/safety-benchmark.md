@@ -7,9 +7,9 @@ adversarial variants where a normal import graph can make live or user-modified
 code look unused.
 
 The alpha.11 candidate is required to pass the hosted
-[`CI` matrix](https://github.com/niansia/ai-repo-gardener/actions/runs/33360798184)
+[`CI` matrix](https://github.com/niansia/ai-repo-gardener/actions/runs/33366680582)
 and the separate
-[`exact-wheel` matrix](https://github.com/niansia/ai-repo-gardener/actions/runs/33360798117)
+[`exact-wheel` matrix](https://github.com/niansia/ai-repo-gardener/actions/runs/33366680618)
 on Ubuntu, Windows, and macOS for Python 3.11 through 3.14. The latter built one
 wheel, installed that same artifact in every job, and correctly skipped publish
 because the run came from `main`, not a release tag.
