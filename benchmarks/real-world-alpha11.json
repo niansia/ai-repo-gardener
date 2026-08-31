@@ -1,0 +1,581 @@
+{
+  "measured_at": "2026-08-31T07:03:32.180004+00:00",
+  "modes": [
+    "scan-cold",
+    "scan-warm",
+    "diff",
+    "structure",
+    "style"
+  ],
+  "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+  "python": "3.12.14",
+  "repo_gardener_version": "0.1.0a11",
+  "repositories": {
+    "django": {
+      "commit": "73cc09f14f13fedddc14d6ba5b287cb33c24e4a4",
+      "runs": {
+        "diff": {
+          "by_rule": {},
+          "findings": 0,
+          "high": 0,
+          "low": 0,
+          "medium": 0,
+          "parse_cache_hits": 2928,
+          "parse_error_files": [
+            "tests/test_runner_apps/tagged/tests_syntax_error.py"
+          ],
+          "parse_errors": 1,
+          "python_files": 2929,
+          "safe_delete_candidates": 0,
+          "wall_seconds": 40.033
+        },
+        "scan-cold": {
+          "by_rule": {
+            "dependency-leftover": 1,
+            "duplicate-implementation": 6,
+            "orphan-helper": 1,
+            "stale-file": 72
+          },
+          "findings": 80,
+          "high": 6,
+          "low": 72,
+          "medium": 2,
+          "parse_cache_hits": 0,
+          "parse_error_files": [
+            "tests/test_runner_apps/tagged/tests_syntax_error.py"
+          ],
+          "parse_errors": 1,
+          "python_files": 2929,
+          "safe_delete_candidates": 0,
+          "wall_seconds": 48.673
+        },
+        "scan-warm": {
+          "by_rule": {
+            "dependency-leftover": 1,
+            "duplicate-implementation": 6,
+            "orphan-helper": 1,
+            "stale-file": 72
+          },
+          "findings": 80,
+          "high": 6,
+          "low": 72,
+          "medium": 2,
+          "parse_cache_hits": 2928,
+          "parse_error_files": [
+            "tests/test_runner_apps/tagged/tests_syntax_error.py"
+          ],
+          "parse_errors": 1,
+          "python_files": 2929,
+          "safe_delete_candidates": 0,
+          "wall_seconds": 38.979
+        },
+        "structure": {
+          "by_rule": {
+            "flat-directory": 5
+          },
+          "findings": 5,
+          "high": 2,
+          "low": 1,
+          "medium": 2,
+          "parse_cache_hits": 2928,
+          "parse_error_files": [
+            "tests/test_runner_apps/tagged/tests_syntax_error.py"
+          ],
+          "parse_errors": 1,
+          "python_files": 2929,
+          "safe_delete_candidates": 0,
+          "wall_seconds": 19.64
+        },
+        "style": {
+          "by_rule": {
+            "style-drift": 70
+          },
+          "findings": 70,
+          "high": 16,
+          "low": 24,
+          "medium": 30,
+          "parse_cache_hits": 2928,
+          "parse_error_files": [
+            "tests/test_runner_apps/tagged/tests_syntax_error.py"
+          ],
+          "parse_errors": 1,
+          "python_files": 2929,
+          "safe_delete_candidates": 0,
+          "wall_seconds": 35.817
+        }
+      },
+      "url": "https://github.com/django/django.git"
+    },
+    "fastapi": {
+      "commit": "49033471594ea5d99a80abdf1043231b7791ee49",
+      "runs": {
+        "diff": {
+          "by_rule": {},
+          "findings": 0,
+          "high": 0,
+          "low": 0,
+          "medium": 0,
+          "parse_cache_hits": 1138,
+          "parse_error_files": [],
+          "parse_errors": 0,
+          "python_files": 1138,
+          "safe_delete_candidates": 0,
+          "wall_seconds": 5.367
+        },
+        "scan-cold": {
+          "by_rule": {
+            "duplicate-implementation": 25
+          },
+          "findings": 25,
+          "high": 25,
+          "low": 0,
+          "medium": 0,
+          "parse_cache_hits": 0,
+          "parse_error_files": [],
+          "parse_errors": 0,
+          "python_files": 1138,
+          "safe_delete_candidates": 0,
+          "wall_seconds": 7.812
+        },
+        "scan-warm": {
+          "by_rule": {
+            "duplicate-implementation": 25
+          },
+          "findings": 25,
+          "high": 25,
+          "low": 0,
+          "medium": 0,
+          "parse_cache_hits": 1138,
+          "parse_error_files": [],
+          "parse_errors": 0,
+          "python_files": 1138,
+          "safe_delete_candidates": 0,
+          "wall_seconds": 5.139
+        },
+        "structure": {
+          "by_rule": {
+            "flat-directory": 5
+          },
+          "findings": 5,
+          "high": 1,
+          "low": 4,
+          "medium": 0,
+          "parse_cache_hits": 1138,
+          "parse_error_files": [],
+          "parse_errors": 0,
+          "python_files": 1138,
+          "safe_delete_candidates": 0,
+          "wall_seconds": 4.223
+        },
+        "style": {
+          "by_rule": {
+            "style-drift": 61
+          },
+          "findings": 61,
+          "high": 11,
+          "low": 24,
+          "medium": 26,
+          "parse_cache_hits": 1138,
+          "parse_error_files": [],
+          "parse_errors": 0,
+          "python_files": 1138,
+          "safe_delete_candidates": 0,
+          "wall_seconds": 7.978
+        }
+      },
+      "url": "https://github.com/fastapi/fastapi.git"
+    },
+    "flask": {
+      "commit": "d318b683471101618febed18996405ad26462110",
+      "runs": {
+        "diff": {
+          "by_rule": {},
+          "findings": 0,
+          "high": 0,
+          "low": 0,
+          "medium": 0,
+          "parse_cache_hits": 83,
+          "parse_error_files": [],
+          "parse_errors": 0,
+          "python_files": 83,
+          "safe_delete_candidates": 0,
+          "wall_seconds": 0.699
+        },
+        "scan-cold": {
+          "by_rule": {
+            "duplicate-implementation": 1,
+            "orphan-helper": 1
+          },
+          "findings": 2,
+          "high": 1,
+          "low": 0,
+          "medium": 1,
+          "parse_cache_hits": 0,
+          "parse_error_files": [],
+          "parse_errors": 0,
+          "python_files": 83,
+          "safe_delete_candidates": 0,
+          "wall_seconds": 1.187
+        },
+        "scan-warm": {
+          "by_rule": {
+            "duplicate-implementation": 1,
+            "orphan-helper": 1
+          },
+          "findings": 2,
+          "high": 1,
+          "low": 0,
+          "medium": 1,
+          "parse_cache_hits": 83,
+          "parse_error_files": [],
+          "parse_errors": 0,
+          "python_files": 83,
+          "safe_delete_candidates": 0,
+          "wall_seconds": 0.685
+        },
+        "structure": {
+          "by_rule": {
+            "flat-directory": 1
+          },
+          "findings": 1,
+          "high": 0,
+          "low": 1,
+          "medium": 0,
+          "parse_cache_hits": 83,
+          "parse_error_files": [],
+          "parse_errors": 0,
+          "python_files": 83,
+          "safe_delete_candidates": 0,
+          "wall_seconds": 0.491
+        },
+        "style": {
+          "by_rule": {
+            "style-drift": 3
+          },
+          "findings": 3,
+          "high": 1,
+          "low": 0,
+          "medium": 2,
+          "parse_cache_hits": 83,
+          "parse_error_files": [],
+          "parse_errors": 0,
+          "python_files": 83,
+          "safe_delete_candidates": 0,
+          "wall_seconds": 0.952
+        }
+      },
+      "url": "https://github.com/pallets/flask.git"
+    },
+    "pandas": {
+      "commit": "4dfc8c7dfbe477ec3c50b6088e0ba34018f9fec4",
+      "runs": {
+        "diff": {
+          "by_rule": {},
+          "findings": 0,
+          "high": 0,
+          "low": 0,
+          "medium": 0,
+          "parse_cache_hits": 1519,
+          "parse_error_files": [],
+          "parse_errors": 0,
+          "python_files": 1519,
+          "safe_delete_candidates": 0,
+          "wall_seconds": 26.583
+        },
+        "scan-cold": {
+          "by_rule": {
+            "stale-file": 1
+          },
+          "findings": 1,
+          "high": 0,
+          "low": 1,
+          "medium": 0,
+          "parse_cache_hits": 0,
+          "parse_error_files": [],
+          "parse_errors": 0,
+          "python_files": 1519,
+          "safe_delete_candidates": 0,
+          "wall_seconds": 38.842
+        },
+        "scan-warm": {
+          "by_rule": {
+            "stale-file": 1
+          },
+          "findings": 1,
+          "high": 0,
+          "low": 1,
+          "medium": 0,
+          "parse_cache_hits": 1519,
+          "parse_error_files": [],
+          "parse_errors": 0,
+          "python_files": 1519,
+          "safe_delete_candidates": 0,
+          "wall_seconds": 25.869
+        },
+        "structure": {
+          "by_rule": {
+            "flat-directory": 4
+          },
+          "findings": 4,
+          "high": 2,
+          "low": 2,
+          "medium": 0,
+          "parse_cache_hits": 1519,
+          "parse_error_files": [],
+          "parse_errors": 0,
+          "python_files": 1519,
+          "safe_delete_candidates": 0,
+          "wall_seconds": 17.659
+        },
+        "style": {
+          "by_rule": {
+            "style-drift": 49
+          },
+          "findings": 49,
+          "high": 4,
+          "low": 18,
+          "medium": 27,
+          "parse_cache_hits": 1519,
+          "parse_error_files": [],
+          "parse_errors": 0,
+          "python_files": 1519,
+          "safe_delete_candidates": 0,
+          "wall_seconds": 39.181
+        }
+      },
+      "url": "https://github.com/pandas-dev/pandas.git"
+    },
+    "pydantic": {
+      "commit": "f512b087202f58ec90a9d38c9102858567d72440",
+      "runs": {
+        "diff": {
+          "by_rule": {},
+          "findings": 0,
+          "high": 0,
+          "low": 0,
+          "medium": 0,
+          "parse_cache_hits": 439,
+          "parse_error_files": [],
+          "parse_errors": 0,
+          "python_files": 439,
+          "safe_delete_candidates": 0,
+          "wall_seconds": 7.031
+        },
+        "scan-cold": {
+          "by_rule": {
+            "duplicate-implementation": 3
+          },
+          "findings": 3,
+          "high": 3,
+          "low": 0,
+          "medium": 0,
+          "parse_cache_hits": 0,
+          "parse_error_files": [],
+          "parse_errors": 0,
+          "python_files": 439,
+          "safe_delete_candidates": 0,
+          "wall_seconds": 10.465
+        },
+        "scan-warm": {
+          "by_rule": {
+            "duplicate-implementation": 3
+          },
+          "findings": 3,
+          "high": 3,
+          "low": 0,
+          "medium": 0,
+          "parse_cache_hits": 439,
+          "parse_error_files": [],
+          "parse_errors": 0,
+          "python_files": 439,
+          "safe_delete_candidates": 0,
+          "wall_seconds": 6.448
+        },
+        "structure": {
+          "by_rule": {
+            "flat-directory": 3
+          },
+          "findings": 3,
+          "high": 3,
+          "low": 0,
+          "medium": 0,
+          "parse_cache_hits": 439,
+          "parse_error_files": [],
+          "parse_errors": 0,
+          "python_files": 439,
+          "safe_delete_candidates": 0,
+          "wall_seconds": 3.154
+        },
+        "style": {
+          "by_rule": {
+            "style-drift": 13
+          },
+          "findings": 13,
+          "high": 10,
+          "low": 2,
+          "medium": 1,
+          "parse_cache_hits": 439,
+          "parse_error_files": [],
+          "parse_errors": 0,
+          "python_files": 439,
+          "safe_delete_candidates": 0,
+          "wall_seconds": 8.177
+        }
+      },
+      "url": "https://github.com/pydantic/pydantic.git"
+    },
+    "pytest": {
+      "commit": "5d85267e3539968dad33937295b0a77b6c7eb7b3",
+      "runs": {
+        "diff": {
+          "by_rule": {
+            "orphan-file": 1
+          },
+          "findings": 1,
+          "high": 0,
+          "low": 0,
+          "medium": 1,
+          "parse_cache_hits": 272,
+          "parse_error_files": [],
+          "parse_errors": 0,
+          "python_files": 272,
+          "safe_delete_candidates": 0,
+          "wall_seconds": 22.451
+        },
+        "scan-cold": {
+          "by_rule": {},
+          "findings": 0,
+          "high": 0,
+          "low": 0,
+          "medium": 0,
+          "parse_cache_hits": 0,
+          "parse_error_files": [],
+          "parse_errors": 0,
+          "python_files": 272,
+          "safe_delete_candidates": 0,
+          "wall_seconds": 24.221
+        },
+        "scan-warm": {
+          "by_rule": {},
+          "findings": 0,
+          "high": 0,
+          "low": 0,
+          "medium": 0,
+          "parse_cache_hits": 272,
+          "parse_error_files": [],
+          "parse_errors": 0,
+          "python_files": 272,
+          "safe_delete_candidates": 0,
+          "wall_seconds": 21.908
+        },
+        "structure": {
+          "by_rule": {
+            "flat-directory": 1
+          },
+          "findings": 1,
+          "high": 1,
+          "low": 0,
+          "medium": 0,
+          "parse_cache_hits": 272,
+          "parse_error_files": [],
+          "parse_errors": 0,
+          "python_files": 272,
+          "safe_delete_candidates": 0,
+          "wall_seconds": 2.14
+        },
+        "style": {
+          "by_rule": {
+            "style-drift": 8
+          },
+          "findings": 8,
+          "high": 2,
+          "low": 0,
+          "medium": 6,
+          "parse_cache_hits": 272,
+          "parse_error_files": [],
+          "parse_errors": 0,
+          "python_files": 272,
+          "safe_delete_candidates": 0,
+          "wall_seconds": 4.738
+        }
+      },
+      "url": "https://github.com/pytest-dev/pytest.git"
+    },
+    "requests": {
+      "commit": "5460f467b02e49471c0fd6cfc9ca0adab6351f98",
+      "runs": {
+        "diff": {
+          "by_rule": {},
+          "findings": 0,
+          "high": 0,
+          "low": 0,
+          "medium": 0,
+          "parse_cache_hits": 37,
+          "parse_error_files": [],
+          "parse_errors": 0,
+          "python_files": 37,
+          "safe_delete_candidates": 0,
+          "wall_seconds": 0.513
+        },
+        "scan-cold": {
+          "by_rule": {},
+          "findings": 0,
+          "high": 0,
+          "low": 0,
+          "medium": 0,
+          "parse_cache_hits": 0,
+          "parse_error_files": [],
+          "parse_errors": 0,
+          "python_files": 37,
+          "safe_delete_candidates": 0,
+          "wall_seconds": 0.694
+        },
+        "scan-warm": {
+          "by_rule": {},
+          "findings": 0,
+          "high": 0,
+          "low": 0,
+          "medium": 0,
+          "parse_cache_hits": 37,
+          "parse_error_files": [],
+          "parse_errors": 0,
+          "python_files": 37,
+          "safe_delete_candidates": 0,
+          "wall_seconds": 0.479
+        },
+        "structure": {
+          "by_rule": {
+            "flat-directory": 1
+          },
+          "findings": 1,
+          "high": 0,
+          "low": 1,
+          "medium": 0,
+          "parse_cache_hits": 37,
+          "parse_error_files": [],
+          "parse_errors": 0,
+          "python_files": 37,
+          "safe_delete_candidates": 0,
+          "wall_seconds": 0.339
+        },
+        "style": {
+          "by_rule": {
+            "style-drift": 2
+          },
+          "findings": 2,
+          "high": 0,
+          "low": 1,
+          "medium": 1,
+          "parse_cache_hits": 37,
+          "parse_error_files": [],
+          "parse_errors": 0,
+          "python_files": 37,
+          "safe_delete_candidates": 0,
+          "wall_seconds": 0.664
+        }
+      },
+      "url": "https://github.com/psf/requests.git"
+    }
+  },
+  "schema_version": 1
+}
