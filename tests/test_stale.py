@@ -185,6 +185,18 @@ def test_runpy_and_module_shaped_registry_strings_keep_modules_live(
             "from importlib.machinery import SourcelessFileLoader as Loader\n\n"
             "def load(name, path):\n    return Loader(name, path)"
         ),
+        (
+            "import importlib\n\n"
+            "def load(name):\n"
+            "    return {'python': importlib.import_module}['python'](name)"
+        ),
+        (
+            "import importlib\n\n"
+            "class Loader:\n"
+            "    load_module = importlib.import_module\n\n"
+            "    def load(self, name):\n"
+            "        return self.load_module(name)"
+        ),
     ],
 )
 def test_opaque_runtime_discovery_disables_safe_deletion(
@@ -993,6 +1005,49 @@ def test_config_entrypoint_accepts_object_suffix(tmp_path: Path) -> None:
             "from fastapi import FastAPI as F\nimport worker\nAPI = F\napp = API()",
             "fastapi",
         ),
+        (
+            (
+                "try:\n    from fastapi import FastAPI as F\n"
+                "except ImportError:\n    F = object\n"
+                "import worker\napp = F()"
+            ),
+            "fastapi",
+        ),
+        (
+            (
+                "if True:\n    from flask import Flask as F\n"
+                "import worker\napp = F(__name__)"
+            ),
+            "flask",
+        ),
+        (
+            ("if True:\n    from typer import Typer as T\nimport worker\napp = T()"),
+            "typer",
+        ),
+        (
+            (
+                "if True:\n    from click import command as cmd\n"
+                "import worker\n@cmd()\ndef cli():\n    pass"
+            ),
+            "click",
+        ),
+        (
+            (
+                "import worker\n\ndef create_app():\n"
+                "    from flask import Flask as F\n"
+                "    return F(__name__)"
+            ),
+            "flask",
+        ),
+        (
+            (
+                "import worker\n\ndef create_app():\n"
+                "    try:\n        from fastapi import FastAPI as F\n"
+                "    except ImportError:\n        F = object\n"
+                "    return F()"
+            ),
+            "fastapi",
+        ),
     ],
 )
 def test_framework_entrypoints_keep_imported_modules_live(
@@ -1033,6 +1088,129 @@ def test_ambiguous_import_alias_keeps_every_possible_module_live(
     assert {"foo", "src.foo"} <= analyzer.graph.reachable
     assert analyzer.graph.inbound_count("foo") == 1
     assert analyzer.graph.inbound_count("src.foo") == 1
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "root_kind"),
+    [
+        ("sitecustomize.py", "python-runtime"),
+        ("usercustomize.py", "python-runtime"),
+        ("noxfile.py", "nox"),
+        ("fabfile.py", "fabric"),
+        ("locustfile.py", "locust"),
+        ("docs/conf.py", "sphinx"),
+    ],
+)
+def test_implicit_runtime_and_tool_entrypoints_are_roots(
+    tmp_path: Path, relative_path: str, root_kind: str
+) -> None:
+    write_project(tmp_path, {relative_path: "VALUE = 'active'"})
+
+    analyzer = Analyzer(tmp_path)
+    record = analyzer.records[0]
+
+    assert record.module in analyzer.graph.roots
+    assert root_kind in record.framework_entrypoints
+
+
+def test_assignment_only_config_replacement_is_never_auto_delete(
+    tmp_path: Path,
+) -> None:
+    executable = git_executable()
+    if executable is None:
+        pytest.skip("git is unavailable")
+    write_project(
+        tmp_path,
+        {
+            "app.py": "import settings_v2\n\nif __name__ == '__main__':\n    pass",
+            "settings_v2.py": (
+                "API_URL = 'https://production'\nRETRIES = 9\nFEATURE_ENABLED = True"
+            ),
+        },
+    )
+    _git(executable, tmp_path, "init")
+    _git(executable, tmp_path, "config", "user.email", "tests@example.com")
+    _git(executable, tmp_path, "config", "user.name", "Repo Gardener Tests")
+    _git(executable, tmp_path, "add", ".")
+    _git(executable, tmp_path, "commit", "-m", "old settings")
+    write_project(
+        tmp_path,
+        {
+            "app.py": "import settings\n\nif __name__ == '__main__':\n    pass",
+            "settings.py": (
+                "API_URL = 'http://localhost'\nRETRIES = 1\nFEATURE_ENABLED = False"
+            ),
+        },
+    )
+    _git(executable, tmp_path, "add", ".")
+    _git(executable, tmp_path, "commit", "-m", "replace settings")
+
+    finding = next(
+        item
+        for item in Analyzer(tmp_path).report("diff", "HEAD~1").findings
+        if item.path == "settings_v2.py"
+    )
+
+    assert finding.risk >= 0.55
+    assert finding.recommendation == "review"
+    assert "data_or_config_module_requires_literal_review" in finding.risks
+
+
+def test_replacement_must_preserve_public_constants_signatures_and_class_members(
+    tmp_path: Path,
+) -> None:
+    executable = git_executable()
+    if executable is None:
+        pytest.skip("git is unavailable")
+    old_source = (
+        "MODE = 'production'\n\n"
+        "def parse(value, strict=False):\n    return value\n\n"
+        "class Parser:\n"
+        "    def parse(self, value):\n        return value\n"
+        "    def reset(self):\n        return None\n"
+    )
+    new_source = (
+        "MODE = 'development'\n\n"
+        "def parse(value):\n    return value\n\n"
+        "class Parser:\n"
+        "    def parse(self, value):\n        return value\n"
+    )
+    write_project(
+        tmp_path,
+        {
+            "app.py": "import parser_v2\n\nif __name__ == '__main__':\n    pass",
+            "parser_v2.py": old_source,
+        },
+    )
+    _git(executable, tmp_path, "init")
+    _git(executable, tmp_path, "config", "user.email", "tests@example.com")
+    _git(executable, tmp_path, "config", "user.name", "Repo Gardener Tests")
+    _git(executable, tmp_path, "add", ".")
+    _git(executable, tmp_path, "commit", "-m", "old parser")
+    write_project(
+        tmp_path,
+        {
+            "app.py": "import parser\n\nif __name__ == '__main__':\n    pass",
+            "parser.py": new_source,
+        },
+    )
+    _git(executable, tmp_path, "add", ".")
+    _git(executable, tmp_path, "commit", "-m", "replace parser")
+
+    finding = next(
+        item
+        for item in Analyzer(tmp_path).report("diff", "HEAD~1").findings
+        if item.path == "parser_v2.py"
+    )
+    evidence = {item["type"]: item["value"] for item in finding.evidence}
+
+    assert finding.risk >= 0.55
+    assert finding.recommendation == "review"
+    assert set(evidence["public_contract_changed_in_replacement"]) == {
+        "MODE",
+        "Parser",
+        "parse",
+    }
 
 
 @pytest.mark.parametrize("metadata_key", ["import-names", "import-namespaces"])
@@ -1202,6 +1380,40 @@ def test_unchanged_files_use_external_content_addressed_parse_cache(
     assert third.metrics["parse_cache_hits"] == 0
     assert cache.is_dir()
     assert not (repository / ".repo-gardener").exists()
+
+
+def test_parse_cache_reuses_identical_context_across_ephemeral_worktrees(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cache = tmp_path / "external-cache"
+    first_repository = tmp_path / "agent-worktree-1"
+    second_repository = tmp_path / "agent-worktree-2"
+    monkeypatch.setenv("REPO_GARDENER_CACHE_DIR", str(cache))
+    source = "if __name__ == '__main__':\n    print('ok')\n"
+    write_project(first_repository, {"app.py": source})
+    write_project(second_repository, {"app.py": source})
+
+    first = Analyzer(first_repository).report("scan")
+    second = Analyzer(second_repository).report("scan")
+
+    assert first.metrics["parse_cache_hits"] == 0
+    assert second.metrics["parse_cache_hits"] == 1
+
+
+def test_discovery_never_reads_python_symlinks_outside_repository(
+    tmp_path: Path,
+) -> None:
+    outside = tmp_path.parent / f"{tmp_path.name}-outside.py"
+    outside.write_text("SECRET = 'outside'\n", encoding="utf-8")
+    link = tmp_path / "outside.py"
+    try:
+        link.symlink_to(outside)
+    except OSError:
+        pytest.skip("symlink creation is unavailable")
+
+    analyzer = Analyzer(tmp_path)
+
+    assert analyzer.records == []
 
 
 def _git(executable: str, root: Path, *arguments: str) -> None:

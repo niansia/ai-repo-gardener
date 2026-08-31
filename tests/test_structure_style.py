@@ -147,6 +147,43 @@ def test_structure_uses_git_change_coupling_for_disconnected_domains(
     assert report.metrics["structure_entropy"]["history_coupling_available"] is True
 
 
+def test_cross_domain_bridge_does_not_collapse_weighted_clusters(
+    tmp_path: Path,
+) -> None:
+    write_project(
+        tmp_path,
+        {
+            "repo-gardener.toml": "[analysis]\nflat_directory_threshold = 6",
+            "app.py": (
+                "import auth_session\nimport data_loader\nimport search_query\n"
+                "if __name__ == '__main__':\n    pass"
+            ),
+            "auth_session.py": "import auth_token\nimport data_loader\n",
+            "auth_token.py": "TOKEN = 'token'\n",
+            "data_loader.py": "import data_parser\n",
+            "data_parser.py": "PARSER = 'parser'\n",
+            "search_query.py": "import search_vector\n",
+            "search_vector.py": "VECTOR = 'vector'\n",
+        },
+    )
+
+    finding = next(
+        item
+        for item in Analyzer(tmp_path).report("structure").findings
+        if item.rule == "flat-directory"
+    )
+    clusters = next(
+        item["value"]
+        for item in finding.evidence
+        if item["type"] == "probable_clusters"
+    )
+    file_sets = [set(cluster["files"]) for cluster in clusters]
+
+    assert {"auth_session.py", "auth_token.py"} in file_sets
+    assert {"data_loader.py", "data_parser.py"} in file_sets
+    assert {"search_query.py", "search_vector.py"} in file_sets
+
+
 def test_large_cohesive_package_gets_factual_directory_load_finding(
     tmp_path: Path,
 ) -> None:

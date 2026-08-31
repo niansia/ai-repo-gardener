@@ -1,0 +1,30 @@
+{
+  "django": {
+    "commit": "73cc09f14f13fedddc14d6ba5b287cb33c24e4a4",
+    "url": "https://github.com/django/django.git"
+  },
+  "fastapi": {
+    "commit": "49033471594ea5d99a80abdf1043231b7791ee49",
+    "url": "https://github.com/fastapi/fastapi.git"
+  },
+  "flask": {
+    "commit": "d318b683471101618febed18996405ad26462110",
+    "url": "https://github.com/pallets/flask.git"
+  },
+  "pandas": {
+    "commit": "4dfc8c7dfbe477ec3c50b6088e0ba34018f9fec4",
+    "url": "https://github.com/pandas-dev/pandas.git"
+  },
+  "pydantic": {
+    "commit": "f512b087202f58ec90a9d38c9102858567d72440",
+    "url": "https://github.com/pydantic/pydantic.git"
+  },
+  "pytest": {
+    "commit": "5d85267e3539968dad33937295b0a77b6c7eb7b3",
+    "url": "https://github.com/pytest-dev/pytest.git"
+  },
+  "requests": {
+    "commit": "5460f467b02e49471c0fd6cfc9ca0adab6351f98",
+    "url": "https://github.com/psf/requests.git"
+  }
+}

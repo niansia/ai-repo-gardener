@@ -4,7 +4,7 @@ import ast
 import re
 from dataclasses import dataclass
 
-from .ast_utils import dotted_name
+from .ast_utils import dotted_name, same_scope_nodes
 
 MODULE_REFERENCE = re.compile(
     r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*(?::[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)?"
@@ -50,6 +50,9 @@ class RuntimeReferenceScanner:
             if not isinstance(node, ast.Call):
                 continue
             name = dotted_name(node.func)
+            if not name and _contains_callable_value(node.func, dangerous_callables):
+                opaque = True
+                continue
             if name in execution_calls or name in file_loader_calls:
                 opaque = True
                 continue
@@ -89,6 +92,13 @@ class RuntimeReferenceScanner:
             frozenset(modules),
             frozenset(possible_modules - modules),
             opaque,
+        )
+
+    def scan_strings_only(self) -> RuntimeReferences:
+        """Fast path for files without any dynamic-loading vocabulary."""
+
+        return RuntimeReferences(
+            frozenset(), frozenset(self._module_shaped_strings()), False
         )
 
     def _known_callables(
@@ -284,6 +294,14 @@ class RuntimeReferenceScanner:
 
     def _dangerous_callable_escapes(self, known: set[str]) -> bool:
         for node in self._nodes:
+            if not isinstance(node, ast.ClassDef):
+                continue
+            for child in same_scope_nodes(node.body):
+                if isinstance(child, (ast.Assign, ast.AnnAssign)):
+                    value = child.value
+                    if value is not None and _contains_callable_value(value, known):
+                        return True
+        for node in self._nodes:
             if isinstance(node, ast.Assign):
                 if _contains_callable_value(node.value, known) and not (
                     dotted_name(node.value) in known
@@ -381,6 +399,10 @@ def _contains_callable_value(node: ast.AST, known: set[str]) -> bool:
         return any(
             item is not None and _contains_callable_value(item, known)
             for item in (*node.keys, *node.values)
+        )
+    if isinstance(node, ast.Subscript):
+        return _contains_callable_value(node.value, known) or _contains_callable_value(
+            node.slice, known
         )
     if isinstance(node, ast.Starred):
         return _contains_callable_value(node.value, known)

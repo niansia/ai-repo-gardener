@@ -42,8 +42,19 @@ a `scan` or `diff` run.
 `metrics.parse_errors` is the count of Python files that could not be parsed;
 `metrics.parse_error_files` lists their repository-relative paths. Any nonzero
 count disables automatic deletion and is also surfaced in pretty output.
-`metrics.parse_cache_hits` counts unchanged files whose safe parse record was
-reused from the external content-addressed cache.
+`metrics.parse_cache_hits` counts files whose derived extraction metadata was
+reused from the external cache. The source is still parsed into an AST on a hit.
+Cache identity includes relative parsing context, source content, Python
+version, and an automatically derived analysis ABI, allowing reuse across
+equivalent ephemeral worktrees without preserving stale analyzer results.
+
+Stale-file evidence may include
+`public_surface_missing_from_replacement` or
+`public_contract_changed_in_replacement`. The latter covers signatures,
+class-member surfaces, re-exports, and public constant contracts. Either keeps
+the result out of the automatic-deletion gate. Assignment-only data/config
+modules expose the `data_or_config_module_requires_literal_review` risk for the
+same reason.
 
 Finding IDs are derived from the rule, normalized path, replacement, and evidence fingerprint. Do not assume IDs survive a schema-version change.
 

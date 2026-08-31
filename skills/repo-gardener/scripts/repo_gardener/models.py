@@ -170,6 +170,8 @@ class FileRecord:
     symbols: set[str] = field(default_factory=set)
     symbol_details: tuple[SymbolRecord, ...] = ()
     exported_symbols: set[str] = field(default_factory=set)
+    public_surface: dict[str, str] = field(default_factory=dict)
+    public_assignments: set[str] = field(default_factory=set)
     dynamic_refs: set[str] = field(default_factory=set)
     opaque_dynamic_discovery: bool = False
     vocabulary: set[str] = field(default_factory=set)

@@ -43,6 +43,25 @@ def test_validation_failure_leaves_original_tree_unchanged(tmp_path: Path) -> No
     assert not (tmp_path / ".repo-gardener").exists()
 
 
+def test_validation_failure_surfaces_exit_code_and_stderr(tmp_path: Path) -> None:
+    write_project(tmp_path, {"parser_old.py": "VALUE = 'old'"})
+    finding = Finding(
+        rule="stale-file",
+        category="repo-gc",
+        severity="warning",
+        confidence=0.95,
+        risk=0.0,
+        path="parser_old.py",
+        replacement="parser.py",
+        recommendation="safe_delete_candidate",
+    ).finalize()
+    command = f'"{sys.executable}" -c "import sys; print(\'DETAIL\', file=sys.stderr); sys.exit(7)"'
+
+    with pytest.raises(FixError, match="exit code 7") as caught:
+        apply_deletions(tmp_path, [finding], [command])
+    assert "DETAIL" in str(caught.value)
+
+
 def test_successful_apply_can_be_restored(tmp_path: Path) -> None:
     source = "def parse(value):\n    return value.strip()\n"
     write_project(tmp_path, {"parser_old.py": source})
@@ -784,6 +803,59 @@ def test_linked_worktree_validation_can_use_git_metadata(tmp_path: Path) -> None
 
     assert manifest["status"] == "applied"
     assert not (linked / "parser_old.py").exists()
+
+
+def test_linked_worktree_validation_preserves_staged_and_unstaged_state(
+    tmp_path: Path,
+) -> None:
+    executable = git_executable()
+    if executable is None:
+        pytest.skip("git is unavailable")
+    repository = tmp_path / "repository"
+    linked = tmp_path / "linked"
+    write_project(
+        repository,
+        {
+            "parser_old.py": "VALUE = 'old'",
+            "parser.py": "VALUE = 'new'",
+            "staged.txt": "baseline",
+            "unstaged.txt": "baseline",
+        },
+    )
+    _git(executable, repository, "init")
+    _git(executable, repository, "config", "user.email", "tests@example.com")
+    _git(executable, repository, "config", "user.name", "Repo Gardener Tests")
+    _git(executable, repository, "add", ".")
+    _git(executable, repository, "commit", "-m", "baseline")
+    _git(executable, repository, "worktree", "add", "--detach", str(linked))
+    (linked / "staged.txt").write_text("staged", encoding="utf-8")
+    _git(executable, linked, "add", "staged.txt")
+    (linked / "unstaged.txt").write_text("unstaged", encoding="utf-8")
+    (linked / "validate_index.py").write_text(
+        "import subprocess\n"
+        "staged = subprocess.check_output(['git','diff','--cached','--name-only'], text=True).splitlines()\n"
+        "unstaged = subprocess.check_output(['git','diff','--name-only'], text=True).splitlines()\n"
+        "assert 'staged.txt' in staged\n"
+        "assert 'unstaged.txt' not in staged\n"
+        "assert 'unstaged.txt' in unstaged\n",
+        encoding="utf-8",
+    )
+    finding = Finding(
+        rule="stale-file",
+        category="repo-gc",
+        severity="warning",
+        confidence=0.95,
+        risk=0.0,
+        path="parser_old.py",
+        replacement="parser.py",
+        recommendation="safe_delete_candidate",
+    ).finalize()
+
+    manifest = apply_deletions(
+        linked, [finding], [f'"{sys.executable}" validate_index.py']
+    )
+
+    assert manifest["status"] == "applied"
 
 
 def test_validation_rejects_repository_symlink_that_escapes_workspace(

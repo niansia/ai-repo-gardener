@@ -1,0 +1,32 @@
+name: Pinned real-world benchmark
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "23 4 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pinned-real-world-benchmark
+  cancel-in-progress: true
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+      - name: Run pinned cold, warm, diff, structure, and style measurements
+        run: python benchmarks/run_real_world.py --output benchmark-result.json
+      - name: Upload machine-readable result
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: pinned-real-world-benchmark-${{ github.run_id }}
+          path: benchmark-result.json
+          if-no-files-found: error
+          retention-days: 90

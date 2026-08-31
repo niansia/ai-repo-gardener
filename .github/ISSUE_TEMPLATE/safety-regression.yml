@@ -1,0 +1,50 @@
+name: Safety regression
+description: Report a false safe-delete candidate or another non-confidential safety failure.
+title: "[Safety] "
+labels:
+  - safety
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not disclose exploitable or sensitive repository content here. For confidential vulnerabilities, follow SECURITY.md and use GitHub private vulnerability reporting.
+  - type: input
+    id: version
+    attributes:
+      label: Repo Gardener version
+      placeholder: 0.1.0a10
+    validations:
+      required: true
+  - type: dropdown
+    id: outcome
+    attributes:
+      label: Observed outcome
+      options:
+        - Live file marked safe_delete_candidate
+        - Reviewed plan changed before apply
+        - Validation or rollback changed the original unexpectedly
+        - Other non-confidential safety regression
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Include a small synthetic repository layout, commands, and sanitized JSON evidence.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected safe behavior
+    validations:
+      required: true
+  - type: checkboxes
+    id: confirmation
+    attributes:
+      label: Safety checks
+      options:
+        - label: I removed secrets and private source code from this report.
+          required: true
+        - label: I did not force an unreviewed deletion plan through apply.
+          required: true

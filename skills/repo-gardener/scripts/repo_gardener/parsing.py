@@ -14,11 +14,13 @@ import threading
 import tokenize
 from collections import Counter
 from dataclasses import asdict
+from functools import cache
 from hashlib import sha256
 from itertools import pairwise
 from pathlib import Path
 
-from .ast_utils import dotted_name
+from . import __version__
+from .ast_utils import dotted_name, same_scope_nodes
 from .models import FileRecord, ImportRef, StyleMetrics, SymbolRecord
 from .runtime_references import RuntimeReferenceScanner
 
@@ -50,7 +52,28 @@ TEMPORARY_NAMES = {
 }
 WORD_RE = re.compile(r"[A-Za-z][A-Za-z0-9_]+")
 SNAKE_CASE_RE = re.compile(r"^_?[a-z][a-z0-9_]*$")
-PARSE_CACHE_SCHEMA = 1
+PARSE_CACHE_SCHEMA = 2
+FRAMEWORK_IMPORT_ROOTS = {"click", "fastapi", "flask", "typer"}
+DYNAMIC_RUNTIME_MARKERS = (
+    "SourceFileLoader",
+    "SourcelessFileLoader",
+    "__import__",
+    "entry_points",
+    "eval",
+    "exec",
+    "import_module",
+    "importlib",
+    "iter_modules",
+    "monkeypatch",
+    "patch",
+    "pkg_resources",
+    "pkgutil",
+    "run_module",
+    "run_path",
+    "runpy",
+    "spec_from_file_location",
+    "walk_packages",
+)
 _CACHE_LOCK = threading.RLock()
 _CACHE_CONNECTIONS: dict[Path, sqlite3.Connection] = {}
 _CACHE_MEMORY: dict[tuple[Path, str], dict[str, object]] = {}
@@ -67,7 +90,7 @@ def parse_file(
 ) -> FileRecord:
     source = path.read_text(encoding="utf-8-sig", errors="replace")
     cache_key = _parse_cache_key(
-        path, relative_path, module, category, module_aliases, source
+        relative_path, module, category, module_aliases, source
     )
     cached = (
         _read_parse_cache(
@@ -131,12 +154,19 @@ def parse_source(
     record.symbol_details = _symbol_details(tree)
     record.symbols = {symbol.name for symbol in record.symbol_details}
     record.exported_symbols = _public_exports(tree)
-    runtime_references = RuntimeReferenceScanner(tree).scan()
+    record.public_surface = _public_surface(tree)
+    record.public_assignments = _public_assignment_names(tree)
+    runtime_scanner = RuntimeReferenceScanner(tree)
+    runtime_references = (
+        runtime_scanner.scan()
+        if any(marker in source for marker in DYNAMIC_RUNTIME_MARKERS)
+        else runtime_scanner.scan_strings_only()
+    )
     record.dynamic_refs = set(runtime_references.modules)
     record.runtime_string_refs = set(runtime_references.possible_modules)
     record.opaque_dynamic_discovery = runtime_references.opaque_discovery
     record.has_main_guard = _has_main_guard(tree)
-    record.framework_entrypoints = _framework_entrypoints(tree, relative_path)
+    record.framework_entrypoints = _framework_entrypoints(tree, relative_path, source)
     record.declares_public_api = (
         _declares_public_api(tree) or path.name == "__init__.py"
     )
@@ -156,7 +186,6 @@ def populate_style(record: FileRecord) -> None:
 
 
 def _parse_cache_key(
-    path: Path,
     relative_path: str,
     module: str,
     category: str,
@@ -166,8 +195,8 @@ def _parse_cache_key(
     payload = "\x1f".join(
         (
             str(PARSE_CACHE_SCHEMA),
+            _analysis_cache_abi(),
             f"{sys.version_info.major}.{sys.version_info.minor}",
-            str(path.resolve()),
             relative_path,
             module,
             category,
@@ -176,6 +205,27 @@ def _parse_cache_key(
         )
     )
     return sha256(payload.encode("utf-8")).hexdigest()
+
+
+@cache
+def _analysis_cache_abi() -> str:
+    """Fingerprint every implementation file that shapes a cached parse record.
+
+    This removes the upgrade-correctness dependency on a developer remembering
+    to bump a lone integer whenever extraction behavior changes.
+    """
+
+    digest = sha256(f"repo-gardener:{__version__}".encode())
+    package = Path(__file__).resolve().parent
+    for name in ("ast_utils.py", "models.py", "parsing.py", "runtime_references.py"):
+        digest.update(name.encode())
+        try:
+            digest.update((package / name).read_bytes())
+        except OSError:
+            # Installed source distributions normally expose these files.  The
+            # package version remains a safe fallback in unusual importers.
+            digest.update(__version__.encode())
+    return digest.hexdigest()
 
 
 def _parse_cache_root() -> Path | None:
@@ -187,12 +237,12 @@ def _parse_cache_root() -> Path | None:
         return None
     configured = os.environ.get("REPO_GARDENER_CACHE_DIR")
     if configured:
-        return Path(configured).expanduser() / "parse-v1"
+        return Path(configured).expanduser() / "parse-v2"
     if os.name == "nt" and os.environ.get("LOCALAPPDATA"):
-        return Path(os.environ["LOCALAPPDATA"]) / "repo-gardener" / "cache" / "parse-v1"
+        return Path(os.environ["LOCALAPPDATA"]) / "repo-gardener" / "cache" / "parse-v2"
     xdg_cache = os.environ.get("XDG_CACHE_HOME")
     base = Path(xdg_cache).expanduser() if xdg_cache else Path.home() / ".cache"
-    return base / "repo-gardener" / "parse-v1"
+    return base / "repo-gardener" / "parse-v2"
 
 
 def _read_parse_cache(
@@ -236,6 +286,11 @@ def _read_parse_cache(
             ],
             symbol_details=tuple(SymbolRecord(**item) for item in symbols),
             exported_symbols=set(map(str, payload["exported_symbols"])),
+            public_surface={
+                str(name): str(fingerprint)
+                for name, fingerprint in dict(payload["public_surface"]).items()
+            },
+            public_assignments=set(map(str, payload["public_assignments"])),
             dynamic_refs=set(map(str, payload["dynamic_refs"])),
             runtime_string_refs=set(map(str, payload["runtime_string_refs"])),
             opaque_dynamic_discovery=bool(payload["opaque_dynamic_discovery"]),
@@ -270,6 +325,8 @@ def _write_parse_cache(cache_key: str, record: FileRecord) -> None:
         "imports": [asdict(item) for item in record.imports],
         "symbol_details": [asdict(item) for item in record.symbol_details],
         "exported_symbols": sorted(record.exported_symbols),
+        "public_surface": dict(sorted(record.public_surface.items())),
+        "public_assignments": sorted(record.public_assignments),
         "dynamic_refs": sorted(record.dynamic_refs),
         "runtime_string_refs": sorted(record.runtime_string_refs),
         "opaque_dynamic_discovery": record.opaque_dynamic_discovery,
@@ -428,9 +485,10 @@ def _has_main_guard(tree: ast.Module) -> bool:
     return False
 
 
-def _framework_entrypoints(tree: ast.Module, relative_path: str) -> tuple[str, ...]:
+def _framework_entrypoints(
+    tree: ast.Module, relative_path: str, source: str
+) -> tuple[str, ...]:
     frameworks: set[str] = set()
-    bindings = _import_bindings(tree)
     constructors = {
         "FastAPI": "fastapi",
         "fastapi.FastAPI": "fastapi",
@@ -439,71 +497,151 @@ def _framework_entrypoints(tree: ast.Module, relative_path: str) -> tuple[str, .
         "Typer": "typer",
         "typer.Typer": "typer",
     }
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call):
-            framework = constructors.get(_canonical_dotted(node.func, bindings))
-            if framework:
-                frameworks.add(framework)
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            decorators = {
-                _canonical_dotted(
-                    item.func if isinstance(item, ast.Call) else item, bindings
-                )
-                for item in node.decorator_list
-            }
-            if any(name in {"click.command", "click.group"} for name in decorators):
-                frameworks.add("click")
+    if any(root in source for root in FRAMEWORK_IMPORT_ROOTS):
+        _scan_framework_scope(tree.body, {}, frameworks, constructors)
     name = Path(relative_path).name.lower()
     if name in {"asgi.py", "settings.py", "urls.py", "wsgi.py"}:
         frameworks.add("django")
+    if name in {"sitecustomize.py", "usercustomize.py"}:
+        frameworks.add("python-runtime")
+    if name == "noxfile.py":
+        frameworks.add("nox")
+    if name == "fabfile.py":
+        frameworks.add("fabric")
+    if name == "locustfile.py":
+        frameworks.add("locust")
+    relative = Path(relative_path)
+    if name == "conf.py" and any(
+        part.lower() in {"doc", "docs"} for part in relative.parts[:-1]
+    ):
+        frameworks.add("sphinx")
     return tuple(sorted(frameworks))
 
 
-def _import_bindings(tree: ast.Module) -> dict[str, str]:
-    bindings: dict[str, str] = {}
-    for node in tree.body:
+def _scan_framework_scope(
+    body: list[ast.stmt],
+    inherited: dict[str, set[str]],
+    frameworks: set[str],
+    constructors: dict[str, str],
+) -> None:
+    nodes = list(same_scope_nodes(body))
+    bindings = _import_bindings(nodes, inherited)
+    for node in nodes:
+        if isinstance(node, ast.Call):
+            frameworks.update(
+                constructors[name]
+                for name in _canonical_dotted_values(node.func, bindings)
+                if name in constructors
+            )
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            decorators = {
+                name
+                for item in node.decorator_list
+                for name in _canonical_dotted_values(
+                    item.func if isinstance(item, ast.Call) else item, bindings
+                )
+            }
+            if any(name in {"click.command", "click.group"} for name in decorators):
+                frameworks.add("click")
+            for expression in _function_header_expressions(node):
+                for child in ast.walk(expression):
+                    if isinstance(child, ast.Call):
+                        frameworks.update(
+                            constructors[name]
+                            for name in _canonical_dotted_values(child.func, bindings)
+                            if name in constructors
+                        )
+            _scan_framework_scope(node.body, bindings, frameworks, constructors)
+        elif isinstance(node, ast.ClassDef):
+            for expression in (*node.decorator_list, *node.bases):
+                for child in ast.walk(expression):
+                    if isinstance(child, ast.Call):
+                        frameworks.update(
+                            constructors[name]
+                            for name in _canonical_dotted_values(child.func, bindings)
+                            if name in constructors
+                        )
+            _scan_framework_scope(node.body, bindings, frameworks, constructors)
+
+
+def _function_header_expressions(
+    node: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> tuple[ast.expr, ...]:
+    values: list[ast.expr] = [*node.decorator_list, *node.args.defaults]
+    values.extend(value for value in node.args.kw_defaults if value is not None)
+    values.extend(
+        value
+        for value in (
+            node.returns,
+            node.args.vararg.annotation if node.args.vararg else None,
+            node.args.kwarg.annotation if node.args.kwarg else None,
+            *(argument.annotation for argument in node.args.posonlyargs),
+            *(argument.annotation for argument in node.args.args),
+            *(argument.annotation for argument in node.args.kwonlyargs),
+        )
+        if value is not None
+    )
+    return tuple(values)
+
+
+def _import_bindings(
+    nodes: list[ast.AST], inherited: dict[str, set[str]] | None = None
+) -> dict[str, set[str]]:
+    bindings: dict[str, set[str]] = {
+        name: set(values) for name, values in (inherited or {}).items()
+    }
+    for node in nodes:
         if isinstance(node, ast.Import):
             for alias in node.names:
+                if alias.name.split(".", 1)[0] not in FRAMEWORK_IMPORT_ROOTS:
+                    continue
                 local = alias.asname or alias.name.split(".", 1)[0]
-                bindings[local] = alias.name if alias.asname else local
+                bindings.setdefault(local, set()).add(
+                    alias.name if alias.asname else local
+                )
         elif isinstance(node, ast.ImportFrom) and node.module:
+            if node.module.split(".", 1)[0] not in FRAMEWORK_IMPORT_ROOTS:
+                continue
             for alias in node.names:
                 if alias.name != "*":
-                    bindings[alias.asname or alias.name] = f"{node.module}.{alias.name}"
+                    bindings.setdefault(alias.asname or alias.name, set()).add(
+                        f"{node.module}.{alias.name}"
+                    )
 
     # Follow simple constructor aliases such as ``API = FastAPI``.  This is
     # intentionally bounded to plain names; it does not attempt full data flow.
-    for _ in range(max(1, len(tree.body))):
+    for _ in range(max(1, len(nodes))):
         changed = False
-        for node in tree.body:
+        for node in nodes:
             if not isinstance(node, (ast.Assign, ast.AnnAssign)):
                 continue
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
             value = node.value
             if not isinstance(value, (ast.Name, ast.Attribute)):
                 continue
-            canonical = _canonical_dotted(value, bindings)
+            source_name = dotted_name(value)
+            if not source_name or source_name.partition(".")[0] not in bindings:
+                continue
+            canonical = _canonical_dotted_values(value, bindings)
             if not canonical:
                 continue
             for target in targets:
-                if (
-                    isinstance(target, ast.Name)
-                    and bindings.get(target.id) != canonical
-                ):
-                    bindings[target.id] = canonical
-                    changed = True
+                if isinstance(target, ast.Name):
+                    before = set(bindings.get(target.id, set()))
+                    bindings.setdefault(target.id, set()).update(canonical)
+                    changed = changed or bindings[target.id] != before
         if not changed:
             break
     return bindings
 
 
-def _canonical_dotted(node: ast.AST, bindings: dict[str, str]) -> str:
+def _canonical_dotted_values(node: ast.AST, bindings: dict[str, set[str]]) -> set[str]:
     name = dotted_name(node)
     if not name:
-        return ""
+        return set()
     head, separator, tail = name.partition(".")
-    canonical = bindings.get(head, head)
-    return f"{canonical}.{tail}" if separator else canonical
+    canonical = bindings.get(head, {head})
+    return {f"{value}.{tail}" if separator else value for value in canonical}
 
 
 def _declares_public_api(tree: ast.Module) -> bool:
@@ -539,6 +677,108 @@ def _public_exports(tree: ast.Module) -> set[str]:
             if isinstance(item, ast.Constant) and isinstance(item.value, str)
         )
     return exports
+
+
+def _public_assignment_names(tree: ast.Module) -> set[str]:
+    names: set[str] = set()
+    for node in tree.body:
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+            continue
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        names.update(
+            target.id
+            for target in targets
+            if isinstance(target, ast.Name)
+            and not target.id.startswith("_")
+            and target.id != "__all__"
+        )
+    return names
+
+
+def _public_surface(tree: ast.Module) -> dict[str, str]:
+    """Return a conservative fingerprint of externally visible module shape."""
+
+    surface: dict[str, str] = {}
+    explicit = _public_exports(tree)
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if not node.name.startswith("_") or node.name in explicit:
+                surface[node.name] = _surface_hash(
+                    "async-function"
+                    if isinstance(node, ast.AsyncFunctionDef)
+                    else "function",
+                    node.args,
+                    node.decorator_list,
+                )
+        elif isinstance(node, ast.ClassDef):
+            if not node.name.startswith("_") or node.name in explicit:
+                members: list[object] = []
+                for member in node.body:
+                    if isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef)) and (
+                        not member.name.startswith("_") or member.name.startswith("__")
+                    ):
+                        members.extend(
+                            (member.name, member.args, member.decorator_list)
+                        )
+                    elif isinstance(member, (ast.Assign, ast.AnnAssign)):
+                        targets = (
+                            member.targets
+                            if isinstance(member, ast.Assign)
+                            else [member.target]
+                        )
+                        members.extend(
+                            target.id
+                            for target in targets
+                            if isinstance(target, ast.Name)
+                            and not target.id.startswith("_")
+                        )
+                surface[node.name] = _surface_hash(
+                    "class", node.bases, node.keywords, members
+                )
+        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            value = node.value
+            for target in targets:
+                if (
+                    isinstance(target, ast.Name)
+                    and target.id != "__all__"
+                    and (not target.id.startswith("_") or target.id in explicit)
+                ):
+                    surface[target.id] = _surface_hash(
+                        "assignment",
+                        node.annotation if isinstance(node, ast.AnnAssign) else None,
+                        value,
+                    )
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                local = alias.asname or alias.name.split(".", 1)[0]
+                if not local.startswith("_") or local in explicit:
+                    surface[local] = _surface_hash("import", alias.name)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            for alias in node.names:
+                if alias.name == "*":
+                    continue
+                local = alias.asname or alias.name
+                if not local.startswith("_") or local in explicit:
+                    surface[local] = _surface_hash(
+                        "import-from", node.module, alias.name, node.level
+                    )
+    for name in explicit:
+        surface.setdefault(name, _surface_hash("explicit-export"))
+    return surface
+
+
+def _surface_hash(*values: object) -> str:
+    payload = "\x1f".join(_surface_value(value) for value in values)
+    return sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _surface_value(value: object) -> str:
+    if isinstance(value, ast.AST):
+        return ast.dump(value, include_attributes=False)
+    if isinstance(value, (list, tuple)):
+        return "[" + ",".join(_surface_value(item) for item in value) + "]"
+    return repr(value)
 
 
 def _symbol_details(tree: ast.Module) -> tuple[SymbolRecord, ...]:

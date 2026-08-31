@@ -1,0 +1,7 @@
+# Safety-critical analysis and mutation boundaries require owner review.
+/skills/repo-gardener/scripts/repo_gardener/analysis/ @niansia
+/skills/repo-gardener/scripts/repo_gardener/fixes.py @niansia
+/skills/repo-gardener/scripts/repo_gardener/parsing.py @niansia
+/skills/repo-gardener/scripts/repo_gardener/runtime_references.py @niansia
+/.github/workflows/ @niansia
+/pyproject.toml @niansia

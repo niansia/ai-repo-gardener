@@ -1,13 +1,13 @@
 # AI Repo Gardener
 
 [![CI](https://github.com/niansia/ai-repo-gardener/actions/workflows/ci.yml/badge.svg)](https://github.com/niansia/ai-repo-gardener/actions/workflows/ci.yml)
-[![GitHub prerelease](https://img.shields.io/github/v/release/niansia/ai-repo-gardener?include_prereleases&label=release)](https://github.com/niansia/ai-repo-gardener/releases/tag/v0.1.0-alpha.9)
+[![GitHub prerelease](https://img.shields.io/github/v/release/niansia/ai-repo-gardener?include_prereleases&label=release)](https://github.com/niansia/ai-repo-gardener/releases/tag/v0.1.0-alpha.10)
 
 **Find files the AI forgot to delete.**
 
 AI Repo Gardener is a deterministic garbage collector for AI-edited Python
 repositories. The package, CLI, and portable Skill keep the concise
-`repo-gardener` identifier. Version `0.1.0a9` covers three evidence systems:
+`repo-gardener` identifier. Version `0.1.0a10` covers three evidence systems:
 repository garbage collection, folder-architecture pressure, and
 baseline-relative Python house-style drift. Weak guesses never become
 automatic deletions or automatic moves.
@@ -56,9 +56,10 @@ committed range.
 - Both conventional `src/package` imports and literal `src.package` imports.
 - Worktree, staged, committed-range, and untracked changes in `diff` mode.
 - Built-in entrypoint recognition for FastAPI, Flask, Django, Click, and Typer.
-- Import- and constructor-alias-aware framework discovery. Ambiguous import-root
-  spellings keep every possible local module reachable instead of dropping the
-  edge.
+- Import- and constructor-alias-aware framework discovery, including aliases in
+  module-level `try`/conditional blocks and factory-local imports. Ambiguous
+  import-root spellings keep every possible local module reachable instead of
+  dropping the edge.
 - Alias-propagating runtime reference detection for `importlib`, `runpy`,
   `builtins`, `pkgutil`, `pkg_resources`, file-path loaders, module-shaped
   strings, and escaped dynamic-loader callables.
@@ -68,6 +69,12 @@ committed range.
   are protected as public distribution APIs; dynamic or unresolved metadata
   disables auto-delete.
 - Stable versioned JSON for agents and CI.
+- Python runtime/tool entrypoints such as `sitecustomize.py`,
+  `usercustomize.py`, `noxfile.py`, `fabfile.py`, `locustfile.py`, and
+  `docs/conf.py` are treated as roots even without inbound repository imports.
+- Replacement review compares callable signatures, public class members,
+  re-exports, and public constants; assignment-only data/config modules never
+  become automatic deletion candidates.
 - UTF-8 BOM and ordinary UTF-8/CRLF Python sources are parsed consistently;
   any remaining parse failure is shown in both pretty and JSON output.
 - Python standard library only at runtime; no model call, account, telemetry,
@@ -77,10 +84,12 @@ The symbol and dependency rules are deliberately conservative static evidence,
 not proof that a public API, plugin dependency, CLI tool, or reflective caller
 is unused.
 
-In the published real-repository smoke run, requests produced no findings and
-pandas produced none at the default threshold. Flask produced two review-only
-findings that were manually confirmed: an exact duplicated implementation and
-an unreferenced private helper. Exact commits and timings are recorded in
+The published alpha.10 benchmark pins requests, Flask, pandas, Django, FastAPI,
+pytest, and Pydantic and records cold/warm/diff/structure/style runs. No scan in
+that table produced an automatic-deletion candidate. Findings shown at
+`--confidence all` are broken down by rule so review-only tutorial and
+compatibility duplicates are not confused with deletion proposals. Exact
+commits, timings, and the machine-readable result are in
 [`benchmarks/real-world-smoke.md`](benchmarks/real-world-smoke.md); this is a
 smoke result, not a population-precision claim.
 
@@ -93,7 +102,7 @@ Python 3.11 through 3.14. Platform support is claimed from hosted runs, not
 inferred from a single local machine.
 
 ```bash
-python -m pip install "https://github.com/niansia/ai-repo-gardener/releases/download/v0.1.0-alpha.9/repo_gardener-0.1.0a9-py3-none-any.whl"
+python -m pip install "https://github.com/niansia/ai-repo-gardener/releases/download/v0.1.0-alpha.10/repo_gardener-0.1.0a10-py3-none-any.whl"
 repo-gardener --version
 repo-gardener diff /path/to/project --base HEAD~1
 repo-gardener fix /path/to/project --base HEAD~1 --dry-run
@@ -238,11 +247,13 @@ opt-in to execute commands supplied by that repository and should only be used
 after review. Validation runs against an isolated copy where the planned
 candidate files have already been removed. Only after validation succeeds does
 AI Repo Gardener reverify the original hashes and perform the real deletion.
-Regular and linked Git worktrees use a disposable Git worktree, so Git-based
-validation remains functional. Repository symlinks that are absolute or escape
-the repository are rejected before validation because they could route a
-relative-path side effect outside the disposable workspace. Other relative-path
-validation side effects stay in the disposable copy. This is not
+Regular and linked Git worktrees use a disposable Git worktree. The original
+staged index is applied separately from the working-tree overlay, so validation
+can distinguish `git diff --cached` from unstaged changes. Repository symlinks
+that are absolute or escape the repository are rejected before validation
+because they could route a relative-path side effect outside the disposable
+workspace. Other relative-path validation side effects stay in the disposable
+copy. A failing command reports its exit code and bounded stderr/stdout. This is not
 a command sandbox: commands that address absolute paths or external services
 can still affect them. Each command has a 300-second default timeout; set a
 different positive limit with `--validation-timeout`.
@@ -260,17 +271,29 @@ deleted candidate files. Validation does not run in the original working tree,
 so its ordinary relative-path cache, coverage, generated-file, or test-fixture
 side effects are discarded with the isolated copy.
 
-Unchanged Python files use a content-addressed parse cache outside the target
-repository (`%LOCALAPPDATA%/repo-gardener/cache` on Windows or the XDG cache
-directory on Unix). `metrics.parse_cache_hits` reports reuse. Set
+Unchanged Python files use an external extraction-metadata cache outside the
+target repository (`%LOCALAPPDATA%/repo-gardener/cache` on Windows or the XDG
+cache directory on Unix). The key combines repository-relative parsing context,
+source content, Python version, and an automatically derived analysis ABI, so
+identical ephemeral clones/worktrees can reuse records while analyzer changes
+invalidate old entries. A hit still reparses the source with Python's AST for
+safety; it reuses the more expensive derived imports, symbols, framework roots,
+and runtime-reference metadata. `metrics.parse_cache_hits` reports reuse. Set
 `REPO_GARDENER_DISABLE_CACHE=1` to disable it or
 `REPO_GARDENER_CACHE_DIR` to choose a different parent directory. Source text
 is not stored in the cache, and changing file content invalidates the entry.
 
-Tagged releases use a build-once pipeline: one wheel is built, installed and
-tested outside the source tree on all 12 OS/Python combinations, validated as a
-portable Skill, dogfooded, provenance-attested, and only then attached to the
-GitHub prerelease. Third-party Actions are pinned to full commit SHAs.
+The same build-once release candidate runs on pull requests, `main`, and manual
+dispatch without publishing. Tags reuse that pipeline: one wheel is built,
+installed and tested outside the source tree on all 12 OS/Python combinations,
+validated as a portable Skill, dogfooded, provenance-attested, attached to a
+draft prerelease, and published only after every gate passes. Third-party
+Actions are pinned to full commit SHAs. Weekly pinned-repository benchmarks
+publish their JSON result as a workflow artifact.
+
+Security reports follow [`SECURITY.md`](SECURITY.md). Safety-critical files
+have code-owner review rules, dependency updates are monitored, and protected
+branch/tag policies are configured in GitHub rather than implied by this file.
 
 The JSON contract is documented in
 [`skills/repo-gardener/references/finding-schema.md`](skills/repo-gardener/references/finding-schema.md).

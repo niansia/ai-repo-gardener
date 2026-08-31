@@ -143,6 +143,20 @@ def _build_finding(
     if uncovered_symbols:
         risk = max(risk, 0.55)
         risks.append("replacement_missing_symbols")
+    missing_public_surface = sorted(
+        set(candidate.public_surface) - set(replacement.public_surface)
+    )
+    changed_public_surface = sorted(
+        name
+        for name in set(candidate.public_surface) & set(replacement.public_surface)
+        if candidate.public_surface[name] != replacement.public_surface[name]
+    )
+    if missing_public_surface:
+        risk = max(risk, 0.65)
+        risks.append("replacement_missing_public_surface")
+    if changed_public_surface:
+        risk = max(risk, 0.55)
+        risks.append("replacement_changed_public_contract")
     call_site = _call_site_migration(candidate, replacement, migrations)
     candidate_birth = (
         file_birth(root, candidate.relative_path) if is_git_repository(root) else None
@@ -178,6 +192,8 @@ def _build_finding(
         inbound,
         naming,
         uncovered_symbols,
+        missing_public_surface,
+        changed_public_surface,
     )
     evidence.extend(
         [
@@ -321,6 +337,9 @@ def _risk(
     elif record.relative_path.startswith("src/") and not config.allow_delete_src:
         risk = max(risk, 0.25)
         risks.append("possible_external_package_module")
+    if record.public_assignments and not record.symbol_details:
+        risk = max(risk, 0.55)
+        risks.append("data_or_config_module_requires_literal_review")
     opaque_users = sorted(
         user.relative_path for user in records if user.opaque_dynamic_discovery
     )
@@ -441,6 +460,8 @@ def _evidence(
     inbound: int,
     naming: bool,
     uncovered_symbols: list[str],
+    missing_public_surface: list[str],
+    changed_public_surface: list[str],
 ) -> list[dict[str, object]]:
     evidence: list[dict[str, object]] = [
         {"type": "unreachable_from_entrypoints", "value": True},
@@ -461,6 +482,20 @@ def _evidence(
             {
                 "type": "symbols_missing_from_replacement",
                 "value": uncovered_symbols,
+            }
+        )
+    if missing_public_surface:
+        evidence.append(
+            {
+                "type": "public_surface_missing_from_replacement",
+                "value": missing_public_surface,
+            }
+        )
+    if changed_public_surface:
+        evidence.append(
+            {
+                "type": "public_contract_changed_in_replacement",
+                "value": changed_public_surface,
             }
         )
     if call_site:

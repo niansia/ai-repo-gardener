@@ -28,12 +28,17 @@ IGNORED_DIRECTORIES = {
 
 
 def discover_python_files(root: Path, config: Config) -> list[Path]:
+    root_resolved = root.resolve()
     candidates = _git_files(root)
     if candidates is None:
         candidates = _walk_files(root)
     result: list[Path] = []
     for path in candidates:
-        if path.suffix != ".py" or not path.is_file():
+        if path.suffix != ".py" or path.is_symlink() or not path.is_file():
+            continue
+        try:
+            path.resolve().relative_to(root_resolved)
+        except (OSError, ValueError):
             continue
         relative = path.relative_to(root).as_posix()
         if config.is_excluded(relative):

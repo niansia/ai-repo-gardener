@@ -209,30 +209,44 @@ def _clusters(
 ) -> list[dict[str, object]]:
     modules = {record.module: record for record in records}
     active = sorted(module for module in modules if module not in graph.roots)
-    adjacency: dict[str, set[str]] = {module: set() for module in active}
-    for (left, right), signals in affinities.items():
-        if left in adjacency and right in adjacency and signals["combined"] >= 0.42:
-            adjacency[left].add(right)
-            adjacency[right].add(left)
-
-    unseen = set(active)
-    components: list[set[str]] = []
-    while unseen:
-        start = min(unseen)
-        stack = [start]
-        component: set[str] = set()
-        while stack:
-            module = stack.pop()
-            if module in component:
-                continue
-            component.add(module)
-            stack.extend(sorted(adjacency[module] - component, reverse=True))
-        unseen -= component
-        if len(component) >= 2:
-            components.append(component)
+    components: list[set[str]] = [{module} for module in active]
+    while True:
+        candidates: list[tuple[float, float, tuple[str, ...], int, int]] = []
+        for left_index, right_index in combinations(range(len(components)), 2):
+            left = components[left_index]
+            right = components[right_index]
+            cross = [
+                affinities[tuple(sorted((left_module, right_module)))]["combined"]
+                for left_module in left
+                for right_module in right
+            ]
+            average = sum(cross) / len(cross)
+            strongest = max(cross)
+            # A single strong cross-domain import must not transitively collapse
+            # two otherwise cohesive domains.  Average-link agglomeration keeps
+            # chains inside small domains while diluting isolated bridge edges.
+            if strongest >= 0.42 and average >= 0.18:
+                members = tuple(sorted(left | right))
+                candidates.append(
+                    (average, strongest, members, left_index, right_index)
+                )
+        if not candidates:
+            break
+        _, _, _, left_index, right_index = max(
+            candidates,
+            key=lambda item: (item[0], item[1], tuple(reversed(item[2]))),
+        )
+        merged = components[left_index] | components[right_index]
+        components = [
+            component
+            for index, component in enumerate(components)
+            if index not in {left_index, right_index}
+        ]
+        components.append(merged)
+        components.sort(key=lambda component: tuple(sorted(component)))
 
     maximum = max(3, int(len(records) * 0.60))
-    credible = [component for component in components if len(component) <= maximum]
+    credible = [component for component in components if 2 <= len(component) <= maximum]
     result: list[dict[str, object]] = []
     for component in credible:
         internal = [

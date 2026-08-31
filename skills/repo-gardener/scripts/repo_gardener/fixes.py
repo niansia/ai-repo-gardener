@@ -194,6 +194,7 @@ def _prepare_validation_workspace(root: Path, workspace: Path) -> bool:
                     f"could not create isolated Git worktree: {detail}"
                 ) from exc
             worktree_created = True
+            _initialize_validation_index(root, workspace, executable)
 
     def ignore_metadata(directory: str, names: list[str]) -> set[str]:
         if Path(directory).resolve() != root:
@@ -227,6 +228,55 @@ def _remove_validation_worktree(root: Path, workspace: Path) -> None:
         check=False,
         capture_output=True,
     )
+
+
+def _initialize_validation_index(root: Path, workspace: Path, executable: str) -> None:
+    """Reproduce the original staged/unstaged distinction in the worktree."""
+
+    try:
+        subprocess.run(
+            [executable, "-C", str(workspace), "reset", "--mixed", "--quiet", "HEAD"],
+            check=True,
+            capture_output=True,
+        )
+        staged = subprocess.run(
+            [
+                executable,
+                "-C",
+                str(root),
+                "diff",
+                "--cached",
+                "--binary",
+                "--full-index",
+                "HEAD",
+                "--",
+            ],
+            check=True,
+            capture_output=True,
+        ).stdout
+        if staged:
+            subprocess.run(
+                [
+                    executable,
+                    "-C",
+                    str(workspace),
+                    "apply",
+                    "--cached",
+                    "--binary",
+                    "--whitespace=nowarn",
+                    "-",
+                ],
+                input=staged,
+                check=True,
+                capture_output=True,
+            )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        detail = getattr(exc, "stderr", b"")
+        if isinstance(detail, bytes):
+            detail = detail.decode("utf-8", errors="replace")
+        raise FixError(
+            f"could not reproduce staged Git state: {detail or exc}"
+        ) from exc
 
 
 def _run_validation_commands(
@@ -266,7 +316,13 @@ def _run_validation_commands(
             }
         )
         if completed.returncode != 0:
-            raise FixError(f"validation failed: {command}")
+            stdout = completed.stdout[-2000:].strip()
+            stderr = completed.stderr[-2000:].strip()
+            detail = stderr or stdout or "no output"
+            raise FixError(
+                f"validation failed with exit code {completed.returncode}: {command}\n"
+                f"last output:\n{detail}"
+            )
     return results
 
 
