@@ -53,6 +53,8 @@ python -m pip install -e ".[dev]"
 python -m pytest
 ```
 
-The same CI also runs the suite on Windows and Ubuntu with Python 3.11 through
-3.14, and validates the bundled skill with a pinned revision of the official
-Agent Skills reference validator.
+The hosted CI matrix is configured to run the suite on Windows, Ubuntu, and
+macOS with Python 3.11 through 3.14, and validates the bundled skill with a
+pinned revision of the official Agent Skills reference validator. The macOS
+matrix was added after the local benchmark above; its status must come from the
+hosted run rather than being inferred here.

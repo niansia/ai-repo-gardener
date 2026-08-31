@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "repo-gardener"
-version = "0.1.0a5"
+version = "0.1.0a6"
 description = "AI Repo Gardener: evidence-backed garbage collection for AI-edited Python repositories"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -14,6 +14,9 @@ keywords = ["ai", "code-quality", "agent-skills", "dead-code", "python"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Environment :: Console",
+  "Operating System :: MacOS",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
