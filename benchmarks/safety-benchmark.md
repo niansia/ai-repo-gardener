@@ -2,10 +2,18 @@
 
 Run on 2026-08-31 with Python 3.12. The alpha.10 source suite contains 167
 tests. The local Windows gate passes 162 and skips five real-symlink tests when
-the account cannot create symlinks. Linux and macOS alpha.10 status must come
-from the hosted exact-wheel matrix after push. This table isolates forty-six
-adversarial variants where a
-normal import graph can make live or user-modified code look unused.
+the account cannot create symlinks. Hosted alpha.10 status is linked below.
+This table isolates forty-six
+adversarial variants where a normal import graph can make live or user-modified
+code look unused.
+
+The alpha.10 candidate passed the hosted
+[`CI` matrix](https://github.com/niansia/ai-repo-gardener/actions/runs/33360798184)
+and the separate
+[`exact-wheel` matrix](https://github.com/niansia/ai-repo-gardener/actions/runs/33360798117)
+on Ubuntu, Windows, and macOS for Python 3.11 through 3.14. The latter built one
+wheel, installed that same artifact in every job, and correctly skipped publish
+because the run came from `main`, not a release tag.
 
 | Scenario | Required outcome | Result |
 | --- | --- | --- |

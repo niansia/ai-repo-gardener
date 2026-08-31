@@ -253,10 +253,10 @@ can distinguish `git diff --cached` from unstaged changes. Repository symlinks
 that are absolute or escape the repository are rejected before validation
 because they could route a relative-path side effect outside the disposable
 workspace. Other relative-path validation side effects stay in the disposable
-copy. A failing command reports its exit code and bounded stderr/stdout. This is not
-a command sandbox: commands that address absolute paths or external services
-can still affect them. Each command has a 300-second default timeout; set a
-different positive limit with `--validation-timeout`.
+copy. A failing command reports its exit code and bounded stderr/stdout. This
+is not a command sandbox: commands that address absolute paths or external
+services can still affect them. Each command has a 300-second default timeout;
+set a different positive limit with `--validation-timeout`.
 
 Applied fixes store recoverable snapshots under `.repo-gardener/`. Add this
 line to the target repository's `.gitignore`:

@@ -199,6 +199,7 @@ def _measure(
         "medium": summary.get("by_confidence", {}).get("medium", 0),
         "low": summary.get("by_confidence", {}).get("low", 0),
         "parse_errors": metrics.get("parse_errors", 0),
+        "parse_error_files": metrics.get("parse_error_files", []),
     }
 
 

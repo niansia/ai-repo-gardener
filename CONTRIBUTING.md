@@ -18,3 +18,15 @@ Repo Gardener optimizes for explainability and false-positive control. A new rul
    ```
 
 Finding schema changes require an explicit `schema_version` decision and updated tests.
+
+## Security-sensitive changes
+
+Changes to deletion eligibility, runtime references, parsing, validation,
+rollback, or release workflows require a regression fixture and code-owner
+review. Do not place exploitable reproductions or private source in a public
+issue; use the private process in [SECURITY.md](SECURITY.md).
+
+The pinned real-world benchmark can be run locally with
+`python benchmarks/run_real_world.py --output benchmark-result.json`. Treat its
+timings as environment-specific and never describe review-only findings as
+automatic deletion candidates.

@@ -1,58 +1,82 @@
-# Real-world smoke run
+# Pinned real-world benchmark
 
-Run on 2026-08-30 with the v0.1 working tree on Windows. Timings are local
-wall-clock measurements and are not a cross-machine performance guarantee.
-A reviewer-reported Linux run measured the same 1,519-file pandas scan at
-18.1 seconds, illustrating that these local timings should not be compared as
-cross-platform performance guarantees.
+Alpha.10 was measured by the hosted
+[`Pinned real-world benchmark`](https://github.com/niansia/ai-repo-gardener/actions/runs/33360806211)
+workflow on 2026-08-31. The runner used Ubuntu/Azure
+(`Linux 6.17.0-1022-azure`, x86-64), Python 3.12.14, and Repo Gardener
+0.1.0a10. Wall-clock values are useful for regression tracking in that
+environment, not as cross-machine guarantees.
 
-A later alias-safety regression caused a reviewer-measured pandas scan to rise
-to 44.7 seconds because assignment aliases were extracted by twelve full AST
-walks per file. Caching the tree-dependent assignment pairs restored that same
-reviewer's copy to 21.0 seconds with unchanged findings. These are reviewer
-measurements, not a replacement for the pinned local table below.
+The benchmark uses the exact commits in
+[`real-world-repos.json`](real-world-repos.json). A complete depth-two shallow
+checkout is materialized before timing so Git network/blob loading is not
+charged to analysis. `scan-cold` starts with an empty Repo Gardener cache;
+later modes reuse the derived extraction metadata. Every mode uses
+`--confidence all`.
 
-Command: `repo-gardener scan <repo> --confidence all`
+## Repository GC scan
 
-| Repository | Commit | Python files | Time | Stale findings |
-| --- | --- | ---: | ---: | --- |
-| requests | `5460f467b02e49471c0fd6cfc9ca0adab6351f98` | 37 | 0.31 s | 0 |
-| Flask | `d318b683471101618febed18996405ad26462110` | 83 | 0.45 s | 0 |
-| pandas | `6ba566ed44260c4a7cac8810be405bcaaee655c6` | 1,519 | 10.52 s | 1 low-confidence finding at 36.2%; hidden by the default threshold |
+| Repository | Commit | Python files | Cold | Warm | Findings by rule | Safe-delete |
+| --- | --- | ---: | ---: | ---: | --- | ---: |
+| Django | `73cc09f` | 2,929 | 36.15 s | 27.65 s | 72 stale-file low; 6 duplicate; 1 orphan-helper; 1 dependency | 0 |
+| FastAPI | `4903347` | 1,138 | 5.03 s | 2.89 s | 25 duplicate implementations in tutorial variants | 0 |
+| Flask | `d318b68` | 83 | 0.93 s | 0.49 s | 1 duplicate; 1 orphan-helper | 0 |
+| pandas | `4dfc8c7` | 1,519 | 31.25 s | 20.91 s | 1 stale-file low | 0 |
+| Pydantic | `f512b08` | 439 | 8.17 s | 4.94 s | 3 duplicate implementations across compatibility/internal code | 0 |
+| pytest | `5d85267` | 272 | 19.69 s | 18.25 s | 0 | 0 |
+| requests | `5460f46` | 37 | 0.47 s | 0.31 s | 0 | 0 |
 
-The audit that triggered this regression work reported 82.6 seconds on a
-1,519-file pandas checkout before candidate indexing and lazy similarity/style
-extraction. Because its exact commit was not recorded, that number is context,
-not a direct before/after benchmark. A separate synthetic run with 1,521 small
-Python files completed in 1.34 seconds.
+All scan findings above are review-only. FastAPI's HIGH findings are exact
+normalized-AST matches among documentation tutorial variants; Pydantic's are
+between v1 compatibility and internal implementations. They are
+`consolidation_review` with elevated risk, never deletion operations. Flask's
+two review findings were manually checked in the earlier smoke audit: one exact
+duplicate and one unreferenced private helper.
 
-Experimental `structure` runs on requests and Flask produced no cluster
-proposal. Each returned only a 60% `review_directory_load` fact with an empty
-cluster list, which is hidden by the default medium-confidence threshold.
+Django contains one deliberately invalid syntax fixture,
+`tests/test_runner_apps/tagged/tests_syntax_error.py`. Repo Gardener reports the
+parse error and disables automatic deletion for that repository as designed.
 
-## Alpha.7 expanded GC smoke
+## Iteration diff
 
-The roadmap rules were rerun on fresh shallow checkouts on 2026-08-31. These
-timings include file-, symbol-, duplicate-, dependency-, and runtime-reference
-analysis. They remain local wall-clock measurements.
+| Repository | Time | Findings at pinned `HEAD~1` | Safe-delete |
+| --- | ---: | --- | ---: |
+| Django | 28.30 s | 0 | 0 |
+| FastAPI | 2.96 s | 0 | 0 |
+| Flask | 0.48 s | 0 | 0 |
+| pandas | 21.51 s | 0 | 0 |
+| Pydantic | 4.99 s | 0 | 0 |
+| pytest | 18.22 s | 1 medium orphan-file review | 0 |
+| requests | 0.35 s | 0 | 0 |
 
-| Repository | Commit | Python files | Time | Findings at `--confidence all` |
-| --- | --- | ---: | ---: | --- |
-| requests | `5460f467b02e49471c0fd6cfc9ca0adab6351f98` | 37 | 0.58 s | 0 |
-| Flask | `d318b683471101618febed18996405ad26462110` | 83 | 0.83 s | 1 exact duplicate + 1 unreferenced private helper, both review-only |
-| pandas | `4dfc8c7dfbe477ec3c50b6088e0ba34018f9fec4` | 1,519 | 23.20 s | 1 low-confidence stale-file review; hidden by default |
+## Experimental analyzers
 
-The same requests and Flask checkouts produced no architecture partition:
-their entropy scores were 40.8 and 30.5, with factual
-`review_directory_load` findings only. Runtime-reference analysis caches one
-whole-tree AST walk per file; duplicate fingerprints are computed without AST
-deep copies. A cold/loaded pandas run can still be slower, so 23.20 seconds is
-not an upper-bound guarantee.
+| Repository | Structure | Structure findings | Style | Style findings |
+| --- | ---: | ---: | ---: | ---: |
+| Django | 12.44 s | 5 | 51.71 s | 70 |
+| FastAPI | 2.00 s | 5 | 16.67 s | 61 |
+| Flask | 0.30 s | 1 | 1.37 s | 3 |
+| pandas | 14.07 s | 4 | 65.55 s | 49 |
+| Pydantic | 2.40 s | 3 | 15.03 s | 13 |
+| pytest | 1.45 s | 1 | 7.90 s | 8 |
+| requests | 0.21 s | 1 | 0.88 s | 2 |
 
-This is a regression smoke test, not a labeled precision benchmark. It does not
-justify a precision percentage.
+Structure and style are proposal/review systems. Their counts are not deletion
+candidates or claims that code was AI-authored. Style uses repository peers in
+this run; an AI-heavy repository should supply a pre-AI baseline.
 
-Alpha.9 adds an external, content-addressed cache for unchanged parse records.
-The first run remains a cold scan; subsequent runs report reuse through
-`metrics.parse_cache_hits`. No new cross-machine timing is claimed here until
-the pinned real-repository table is rerun under the release workflow.
+Warm runs reused extraction metadata for every parseable file (2,928 of 2,929
+for Django and all files elsewhere). A cache hit still performs Python AST
+parsing for safety, so it is not expected to reduce runtime to zero.
+
+The complete machine-readable artifact is committed as
+[`real-world-alpha10.json`](real-world-alpha10.json). Reproduce or extend it
+with:
+
+```bash
+python benchmarks/run_real_world.py --output benchmark-result.json
+```
+
+This is a longitudinal smoke benchmark, not a labeled corpus and not a
+population precision estimate. The separate destructive-safety fixture gate is
+documented in [`safety-benchmark.md`](safety-benchmark.md).
