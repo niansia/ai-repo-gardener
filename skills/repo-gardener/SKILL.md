@@ -63,6 +63,7 @@ Analysis is read-only. Before any deletion, read [references/safety-policy.md](r
 
 ```text
 repo-gardener scan [path]
+repo-gardener skill-path
 repo-gardener stale [path]
 repo-gardener structure [path]
 repo-gardener style [path] --baseline HEAD~20
@@ -74,6 +75,10 @@ repo-gardener fix [path] --restore
 ```
 
 If the package is not installed, replace `repo-gardener` with `python <skill-directory>/scripts/run_repo_gardener.py`.
+
+An installed wheel includes this complete portable Skill. Run
+`repo-gardener skill-path` to print the directory that can be copied into a
+compatible agent's skill location.
 
 For integrations that consume JSON, read [references/finding-schema.md](references/finding-schema.md).
 

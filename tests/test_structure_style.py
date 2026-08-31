@@ -17,8 +17,8 @@ def test_flat_directory_reports_import_affinity_clusters(tmp_path: Path) -> None
         {
             "repo-gardener.toml": "[analysis]\nflat_directory_threshold = 4",
             "app.py": "import auth\nimport search\n\nif __name__ == '__main__':\n    pass",
-            "auth.py": "import token_store\n\ndef login():\n    return token_store.load()",
-            "token_store.py": "def load():\n    return 'token'",
+            "auth.py": "import token\n\ndef login():\n    return token.load()",
+            "token.py": "def load():\n    return 'token'",
             "search.py": "import vector_store\n\ndef query():\n    return vector_store.lookup()",
             "vector_store.py": "def lookup():\n    return []",
         },
@@ -35,6 +35,10 @@ def test_flat_directory_reports_import_affinity_clusters(tmp_path: Path) -> None
         if item["type"] == "probable_clusters"
     )
     assert len(clusters) >= 2
+    vector_cluster = next(
+        cluster for cluster in clusters if "vector_store.py" in cluster["files"]
+    )
+    assert vector_cluster["label"] == "store"
     assert finding.recommendation == "proposal_only"
     plans = next(
         item["value"] for item in finding.evidence if item["type"] == "migration_plan"
@@ -42,6 +46,12 @@ def test_flat_directory_reports_import_affinity_clusters(tmp_path: Path) -> None
     assert len(plans) >= 2
     assert all(plan["apply_supported"] is False for plan in plans)
     assert all(plan["moves"] for plan in plans)
+    vector_plan = next(
+        plan
+        for plan in plans
+        if any(move["from"] == "vector_store.py" for move in plan["moves"])
+    )
+    assert vector_plan["target_directory"] == "store"
     assert report.metrics["structure_entropy"]["score"] > 0
 
 

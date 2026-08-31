@@ -1,9 +1,9 @@
 # Adversarial safety benchmark
 
-Run on 2026-08-31 with Python 3.12. The alpha.7 suite contains 112 tests. The
-local Windows gate passes 109 and skips three real-symlink tests when the
-account cannot create symlinks. Linux and macOS alpha.7 status must come from
-the hosted matrix after push. This table isolates twenty-four cases where a
+Run on 2026-08-31 with Python 3.12. The alpha.8 suite contains 117 tests. The
+local Windows gate passes 114 and skips three real-symlink tests when the
+account cannot create symlinks. Linux and macOS alpha.8 status must come from
+the hosted matrix after push. This table isolates twenty-five cases where a
 normal import graph can make live or user-modified code look unused.
 
 | Scenario | Required outcome | Result |
@@ -11,6 +11,7 @@ normal import graph can make live or user-modified code look unused.
 | `import_module` imported directly, imported with an alias, or assigned through two aliases | Keep live module | Pass |
 | Non-literal `importlib.import_module(name)` | Disable automatic deletion repo-wide | Pass |
 | Repository Python parse error | Keep findings but disable automatic deletion repo-wide | Pass |
+| UTF-8 BOM on a Python importer | Preserve import migration evidence and the correct stale-file conclusion | Pass |
 | `eval` or `exec` runtime execution | Disable automatic deletion repo-wide | Pass |
 | `getattr(importlib, "import_module")` reflection | Disable automatic deletion repo-wide | Pass |
 | `builtins.__import__`, including assigned/imported aliases | Disable automatic deletion repo-wide | Pass |
@@ -33,7 +34,7 @@ normal import graph can make live or user-modified code look unused.
 | Monkeypatch string module path | Keep referenced module | Pass |
 | Framework-discovered FastAPI/Flask/Click/Typer entrypoint | Keep reachable modules | Pass |
 
-Eligible-deletion false positives in these adversarial cases: **0 / 24**.
+Eligible-deletion false positives in these adversarial cases: **0 / 25**.
 
 Transactional gates also verify that `--apply` refuses to run without a reviewed
 plan and rejects a repository whose current operation set has grown since the

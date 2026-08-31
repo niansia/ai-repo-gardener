@@ -39,6 +39,18 @@ def render_pretty(report: Report, confidence: str) -> str:
     structure = data["metrics"].get("structure_entropy")
     if isinstance(structure, dict):
         lines.append(f"Structure entropy: {structure.get('score', 0):.1f}/100")
+    parse_errors = int(data["metrics"].get("parse_errors", 0))
+    if parse_errors:
+        parse_error_files = data["metrics"].get("parse_error_files", [])
+        paths = (
+            ": " + ", ".join(str(path) for path in parse_error_files[:3])
+            if isinstance(parse_error_files, list) and parse_error_files
+            else ""
+        )
+        lines.append(
+            f"WARNING: {parse_errors} Python file(s) could not be parsed{paths}. "
+            "Automatic deletion is disabled until the parse errors are resolved."
+        )
     lines.append("")
     if not data["findings"]:
         lines.append("No findings at the selected confidence level.")

@@ -13,15 +13,31 @@ from ..models import FileRecord, Finding
 
 DEPENDENCY_NAME = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
 KNOWN_IMPORT_NAMES: dict[str, tuple[str, ...]] = {
+    "attrs": ("attr", "attrs"),
     "beautifulsoup4": ("bs4",),
     "opencv-python": ("cv2",),
     "opencv-python-headless": ("cv2",),
     "pillow": ("PIL",),
+    "protobuf": ("google.protobuf",),
+    "pyjwt": ("jwt",),
     "pyyaml": ("yaml",),
     "python-dateutil": ("dateutil",),
+    "python-dotenv": ("dotenv",),
     "scikit-image": ("skimage",),
     "scikit-learn": ("sklearn",),
     "setuptools": ("pkg_resources", "setuptools"),
+}
+COMMAND_ONLY_DEPENDENCIES = {
+    "black",
+    "coverage",
+    "flake8",
+    "gunicorn",
+    "mypy",
+    "nox",
+    "pre-commit",
+    "pytest",
+    "ruff",
+    "tox",
 }
 AMBIGUOUS_NAMESPACE_PREFIXES = (
     "azure-",
@@ -61,6 +77,8 @@ def dependency_leftover_findings(
 
     findings: list[Finding] = []
     for normalized, items in sorted(grouped.items()):
+        if normalized in COMMAND_ONLY_DEPENDENCIES:
+            continue
         candidates = _import_candidates(normalized)
         if imports & set(candidates):
             continue
@@ -211,16 +229,16 @@ def _import_candidates(normalized: str) -> tuple[str, ...]:
 
 
 def _import_roots(records: list[FileRecord]) -> set[str]:
-    roots = {
-        reference.module.split(".", 1)[0]
+    modules = {
+        reference.module
         for record in records
         for reference in record.imports
         if reference.module
     }
-    roots.update(
-        value.split(":", 1)[0].split(".", 1)[0]
+    modules.update(
+        value.split(":", 1)[0]
         for record in records
         for value in record.dynamic_refs | record.runtime_string_refs
         if value
     )
-    return roots
+    return modules | {module.split(".", 1)[0] for module in modules}

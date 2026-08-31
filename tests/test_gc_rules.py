@@ -44,6 +44,40 @@ def test_imported_dependency_is_not_reported_as_leftover(tmp_path: Path) -> None
     assert not any(finding.rule == "dependency-leftover" for finding in report.findings)
 
 
+def test_distribution_import_name_mappings_avoid_false_leftovers(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "mapped-dependencies"\nversion = "0"\n'
+        'dependencies = ["PyJWT", "python-dotenv", "protobuf", "attrs"]\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "app.py").write_text(
+        "import attr\nimport google.protobuf\nimport jwt\nfrom dotenv import load_dotenv\n\n"
+        "if __name__ == '__main__':\n    print(attr, google.protobuf, jwt, load_dotenv)\n",
+        encoding="utf-8",
+    )
+
+    report = Analyzer(tmp_path).report("stale")
+
+    assert not any(finding.rule == "dependency-leftover" for finding in report.findings)
+
+
+def test_command_only_requirements_are_not_dependency_leftovers(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "requirements.txt").write_text(
+        "ruff\npytest\ngunicorn\n", encoding="utf-8"
+    )
+    (tmp_path / "app.py").write_text(
+        "if __name__ == '__main__':\n    print('ready')\n", encoding="utf-8"
+    )
+
+    report = Analyzer(tmp_path).report("stale")
+
+    assert not any(finding.rule == "dependency-leftover" for finding in report.findings)
+
+
 def test_exported_or_referenced_helpers_are_not_orphans(tmp_path: Path) -> None:
     (tmp_path / "app.py").write_text(
         "from service import public_api\n\n"
@@ -66,6 +100,31 @@ def test_exported_or_referenced_helpers_are_not_orphans(tmp_path: Path) -> None:
     }
 
     assert orphan_symbols == set()
+
+
+def test_string_referenced_private_helpers_are_not_orphans(tmp_path: Path) -> None:
+    (tmp_path / "app.py").write_text(
+        "import service\n\nif __name__ == '__main__':\n    service.run()\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "service.py").write_text(
+        "REGISTRY = {'command': '_string_dispatch'}\n"
+        "HOOKS = ['_via_getattr']\n\n"
+        "def run():\n    return REGISTRY, HOOKS\n\n"
+        "def _via_getattr():\n    return 1\n\n"
+        "def _string_dispatch():\n    return 2\n\n"
+        "def _really_dead():\n    return 3\n",
+        encoding="utf-8",
+    )
+
+    report = Analyzer(tmp_path).report("stale")
+    orphan_symbols = {
+        next(item["value"] for item in finding.evidence if item["type"] == "symbol")
+        for finding in report.findings
+        if finding.rule == "orphan-helper"
+    }
+
+    assert orphan_symbols == {"_really_dead"}
 
 
 @pytest.mark.parametrize(

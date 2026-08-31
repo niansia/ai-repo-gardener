@@ -125,6 +125,11 @@ class Analyzer:
             "parse_errors": sum(
                 record.parse_error is not None for record in self.records
             ),
+            "parse_error_files": sorted(
+                record.relative_path
+                for record in self.records
+                if record.parse_error is not None
+            ),
             "experimental_analysis": experimental,
         }
         if base:

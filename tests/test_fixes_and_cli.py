@@ -688,6 +688,18 @@ def test_gitignore_is_respected_without_a_git_repository(tmp_path: Path) -> None
     assert report.metrics["python_files"] == 1
 
 
+def test_skill_path_points_to_complete_portable_skill(capsys) -> None:
+    assert main(["skill-path"]) == 0
+
+    skill = Path(capsys.readouterr().out.strip())
+    assert (skill / "SKILL.md").is_file()
+    assert (skill / "agents" / "openai.yaml").is_file()
+    assert (skill / "references" / "finding-schema.md").is_file()
+    assert (skill / "references" / "safety-policy.md").is_file()
+    assert (skill / "scripts" / "run_repo_gardener.py").is_file()
+    assert (skill / "scripts" / "repo_gardener" / "analysis" / "stale.py").is_file()
+
+
 def _git(executable: str, root: Path, *arguments: str) -> None:
     env = os.environ.copy()
     env["GIT_AUTHOR_DATE"] = "2026-01-01T00:00:00Z"

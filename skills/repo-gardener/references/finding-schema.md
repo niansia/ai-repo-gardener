@@ -37,6 +37,9 @@ Ratio-style evidence may include `support` and `baseline_supported_files`;
 consumers should not discard these observation counts.
 `metrics.experimental_analysis` records whether structure/style were added to
 a `scan` or `diff` run.
+`metrics.parse_errors` is the count of Python files that could not be parsed;
+`metrics.parse_error_files` lists their repository-relative paths. Any nonzero
+count disables automatic deletion and is also surfaced in pretty output.
 
 Finding IDs are derived from the rule, normalized path, replacement, and evidence fingerprint. Do not assume IDs survive a schema-version change.
 

@@ -304,6 +304,10 @@ def test_repository_parse_error_disables_safe_deletion(
     assert finding.recommendation == "review"
     assert any("repository_parse_errors" in risk for risk in finding.risks)
     assert safe_candidates(report.findings) == []
+    assert main(["diff", str(tmp_path), "--base", "HEAD~1"]) == 0
+    pretty = capsys.readouterr().out
+    assert "could not be parsed" in pretty
+    assert "broken.py" in pretty
     assert main(["fix", str(tmp_path), "--base", "HEAD~1", "--dry-run"]) == 0
     assert "1 Python file(s) could not be parsed" in capsys.readouterr().out
     assert (
@@ -327,6 +331,44 @@ def test_repository_parse_error_disables_safe_deletion(
         "could not be parsed" in blocker
         for blocker in plan["automatic_deletion_blockers"]
     )
+
+
+def test_utf8_bom_preserves_import_migration_evidence(tmp_path: Path) -> None:
+    executable = git_executable()
+    if executable is None:
+        pytest.skip("git is unavailable")
+    write_project(
+        tmp_path,
+        {"parser_v2.py": "def parse(value):\n    return value.strip()"},
+    )
+    (tmp_path / "app.py").write_text(
+        "import parser_v2\n\nif __name__ == '__main__':\n    pass\n",
+        encoding="utf-8-sig",
+    )
+    _git(executable, tmp_path, "init")
+    _git(executable, tmp_path, "config", "user.email", "tests@example.com")
+    _git(executable, tmp_path, "config", "user.name", "Repo Gardener Tests")
+    _git(executable, tmp_path, "add", ".")
+    _git(executable, tmp_path, "commit", "-m", "old parser")
+    write_project(
+        tmp_path,
+        {"parser.py": "def parse(value):\n    return value.strip()"},
+    )
+    (tmp_path / "app.py").write_text(
+        "import parser\n\nif __name__ == '__main__':\n    pass\n",
+        encoding="utf-8-sig",
+    )
+    _git(executable, tmp_path, "add", ".")
+    _git(executable, tmp_path, "commit", "-m", "replace parser")
+
+    report = Analyzer(tmp_path).report("diff", "HEAD~1")
+    finding = next(item for item in report.findings if item.path == "parser_v2.py")
+
+    assert report.metrics["parse_errors"] == 0
+    assert finding.replacement == "parser.py"
+    assert finding.confidence >= 0.85
+    assert finding.recommendation == "safe_delete_candidate"
+    assert safe_candidates(report.findings) == [finding]
 
 
 def test_packaging_plugin_entrypoint_is_a_graph_root(tmp_path: Path) -> None:

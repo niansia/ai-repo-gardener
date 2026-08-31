@@ -52,7 +52,7 @@ def parse_file(
     module_aliases: tuple[str, ...] = (),
     collect_style: bool = False,
 ) -> FileRecord:
-    source = path.read_text(encoding="utf-8", errors="replace")
+    source = path.read_text(encoding="utf-8-sig", errors="replace")
     return parse_source(
         source,
         path,
@@ -75,6 +75,7 @@ def parse_source(
     mtime: float = 0.0,
     collect_style: bool = False,
 ) -> FileRecord:
+    source = source.removeprefix("\ufeff")
     record = FileRecord(
         path=path,
         relative_path=relative_path,

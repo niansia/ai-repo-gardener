@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "repo-gardener"
-version = "0.1.0a7"
+version = "0.1.0a8"
 description = "AI Repo Gardener: evidence-backed garbage collection for AI-edited Python repositories"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -26,6 +26,11 @@ classifiers = [
 ]
 dependencies = []
 
+[project.urls]
+Homepage = "https://github.com/niansia/ai-repo-gardener"
+Repository = "https://github.com/niansia/ai-repo-gardener"
+Issues = "https://github.com/niansia/ai-repo-gardener/issues"
+
 [project.optional-dependencies]
 dev = [
   "pillow==12.2.0",
@@ -42,6 +47,14 @@ package-dir = { "" = "skills/repo-gardener/scripts" }
 [tool.setuptools.packages.find]
 where = ["skills/repo-gardener/scripts"]
 include = ["repo_gardener*"]
+
+[tool.setuptools.data-files]
+"share/repo-gardener" = ["skills/repo-gardener/SKILL.md"]
+"share/repo-gardener/agents" = ["skills/repo-gardener/agents/*.yaml"]
+"share/repo-gardener/references" = ["skills/repo-gardener/references/*.md"]
+"share/repo-gardener/scripts" = ["skills/repo-gardener/scripts/run_repo_gardener.py"]
+"share/repo-gardener/scripts/repo_gardener" = ["skills/repo-gardener/scripts/repo_gardener/*.py"]
+"share/repo-gardener/scripts/repo_gardener/analysis" = ["skills/repo-gardener/scripts/repo_gardener/analysis/*.py"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

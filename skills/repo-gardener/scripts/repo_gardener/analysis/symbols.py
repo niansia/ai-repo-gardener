@@ -217,6 +217,10 @@ def _reference_index(
         record.module: {symbol.name for symbol in record.symbol_details}
         for record in records
     }
+    symbol_owners: dict[str, set[str]] = defaultdict(set)
+    for module, symbols in known_symbols.items():
+        for symbol in symbols:
+            symbol_owners[symbol].add(module)
     for record in records:
         if record.parse_error:
             continue
@@ -240,6 +244,13 @@ def _reference_index(
 
         bindings = _module_bindings(tree, graph)
         for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and node.value in symbol_owners
+            ):
+                for module in symbol_owners[node.value]:
+                    references[(module, node.value)].add(record.relative_path)
             if not isinstance(node, ast.Attribute):
                 continue
             dotted = dotted_name(node)

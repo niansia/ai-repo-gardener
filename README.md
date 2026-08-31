@@ -1,13 +1,13 @@
 # AI Repo Gardener
 
 [![CI](https://github.com/niansia/ai-repo-gardener/actions/workflows/ci.yml/badge.svg)](https://github.com/niansia/ai-repo-gardener/actions/workflows/ci.yml)
-[![GitHub prerelease](https://img.shields.io/github/v/release/niansia/ai-repo-gardener?include_prereleases&label=release)](https://github.com/niansia/ai-repo-gardener/releases/tag/v0.1.0-alpha.7)
+[![GitHub prerelease](https://img.shields.io/github/v/release/niansia/ai-repo-gardener?include_prereleases&label=release)](https://github.com/niansia/ai-repo-gardener/releases/tag/v0.1.0-alpha.8)
 
 **Find files the AI forgot to delete.**
 
 AI Repo Gardener is a deterministic garbage collector for AI-edited Python
 repositories. The package, CLI, and portable Skill keep the concise
-`repo-gardener` identifier. Version `0.1.0a7` covers three evidence systems:
+`repo-gardener` identifier. Version `0.1.0a8` covers three evidence systems:
 repository garbage collection, folder-architecture pressure, and
 baseline-relative Python house-style drift. Weak guesses never become
 automatic deletions or automatic moves.
@@ -39,14 +39,17 @@ committed range.
   zero inbound imports, and has no plausible replacement. This is always
   review-only.
 - `orphan-helper`: an unreferenced top-level helper, with private/exported/API
-  boundaries kept explicit. This is always review-only.
+  boundaries and exact string-name references kept explicit. This is always
+  review-only.
 - `duplicate-implementation`: substantial top-level functions with an exact
   normalized-AST match across files. It proposes consolidation review, never
   deletion.
 - `dependency-leftover`: a runtime dependency declared by `pyproject.toml`,
   `requirements.txt`, `requirements/*.txt`, `setup.cfg`, or literal
   `setup.py`, with no matching static/runtime import. Distribution/import-name
-  uncertainty remains visible and the result is review-only.
+  uncertainty remains visible and the result is review-only. Common
+  distribution/import aliases are recognized, while command-only tools such as
+  pytest, ruff, and gunicorn are excluded from this import-based rule.
 - Safe deletion: isolated-copy validation before mutation, snapshot, SHA-256
   verification, symlink and path-escape refusal, stale-plan rejection, and
   manual restore. Apply remains experimental.
@@ -60,12 +63,21 @@ committed range.
   `setup.py` entry points. Setuptools `py_modules` declarations are protected
   as public distribution APIs; unresolved legacy metadata disables auto-delete.
 - Stable versioned JSON for agents and CI.
+- UTF-8 BOM and ordinary UTF-8/CRLF Python sources are parsed consistently;
+  any remaining parse failure is shown in both pretty and JSON output.
 - Python standard library only at runtime; no model call, account, telemetry,
   API key, or network access.
 
 The symbol and dependency rules are deliberately conservative static evidence,
 not proof that a public API, plugin dependency, CLI tool, or reflective caller
 is unused.
+
+In the published real-repository smoke run, requests produced no findings and
+pandas produced none at the default threshold. Flask produced two review-only
+findings that were manually confirmed: an exact duplicated implementation and
+an unreferenced private helper. Exact commits and timings are recorded in
+[`benchmarks/real-world-smoke.md`](benchmarks/real-world-smoke.md); this is a
+smoke result, not a population-precision claim.
 
 ## Try the alpha
 
@@ -76,7 +88,7 @@ Python 3.11 through 3.14. Platform support is claimed from hosted runs, not
 inferred from a single local machine.
 
 ```bash
-python -m pip install "https://github.com/niansia/ai-repo-gardener/releases/download/v0.1.0-alpha.7/repo_gardener-0.1.0a7-py3-none-any.whl"
+python -m pip install "https://github.com/niansia/ai-repo-gardener/releases/download/v0.1.0-alpha.8/repo_gardener-0.1.0a8-py3-none-any.whl"
 repo-gardener --version
 repo-gardener diff /path/to/project --base HEAD~1
 repo-gardener fix /path/to/project --base HEAD~1 --dry-run
@@ -97,19 +109,28 @@ operation set, candidate/replacement hashes, and call-site evidence hashes.
 Apply re-analyzes the repository and exits with an error if the current plan ID
 differs from the reviewed plan.
 
-The bundled Agent Skill is self-contained and can run without installation:
+The release wheel contains the complete portable Agent Skill. Locate it after
+installation, then copy the printed directory into a compatible agent's skill
+directory:
+
+```bash
+repo-gardener skill-path
+```
+
+The repository copy is also self-contained and can run without installation:
 
 ```bash
 python skills/repo-gardener/scripts/run_repo_gardener.py diff /path/to/project --base HEAD~1
 ```
 
-Copy `skills/repo-gardener/` into a compatible agent's skill directory. It
-follows the open [Agent Skills specification](https://agentskills.io/specification).
+Copy `skills/repo-gardener/` when installing from a clone. Both copies follow
+the open [Agent Skills specification](https://agentskills.io/specification).
 
 ## Commands
 
 | Command | Purpose | Mutation |
 | --- | --- | --- |
+| `skill-path` | Print the complete portable Skill bundled with the installation | Never |
 | `scan` | Run the supported repo-GC rules | Never |
 | `stale` | Run file-, symbol-, duplicate-, and dependency-level repo GC | Never |
 | `diff [--base <ref>]` | Audit committed, worktree, staged, and untracked iteration changes; base defaults to `HEAD` | Never |

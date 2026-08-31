@@ -23,13 +23,18 @@ GENERIC_MODULES = {
     "utils",
 }
 VOCABULARY_STOP_WORDS = GENERIC_MODULES | {
+    "add",
+    "build",
     "create",
+    "delete",
+    "find",
     "get",
     "handle",
     "load",
     "main",
     "parse",
     "process",
+    "remove",
     "run",
     "save",
     "set",
@@ -233,12 +238,7 @@ def _clusters(
         combined = sum(item["combined"] for item in internal) / len(internal)
         if combined < 0.30:
             continue
-        words = Counter(
-            word
-            for module in component
-            for word in modules[module].vocabulary - VOCABULARY_STOP_WORDS
-        )
-        label = min(words, key=lambda word: (-words[word], word)) if words else "domain"
+        label = _cluster_label(component, modules)
         result.append(
             {
                 "label": label,
@@ -260,6 +260,25 @@ def _clusters(
             }
         )
     return sorted(result, key=lambda item: (str(item["label"]), repr(item["files"])))
+
+
+def _cluster_label(component: set[str], modules: dict[str, FileRecord]) -> str:
+    scores: Counter[str] = Counter()
+    for module in component:
+        stem = module.rsplit(".", 1)[-1]
+        expanded = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", stem)
+        module_words = [
+            word
+            for word in expanded.lower().split("_")
+            if len(word) > 2 and word not in VOCABULARY_STOP_WORDS
+        ]
+        for word in module_words:
+            scores[word] += 3
+        if len(module_words) > 1:
+            scores[module_words[-1]] += 2
+        for word in modules[module].vocabulary - VOCABULARY_STOP_WORDS:
+            scores[word] += 1
+    return min(scores, key=lambda word: (-scores[word], word)) if scores else "domain"
 
 
 def _entropy_factors(

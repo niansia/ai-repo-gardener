@@ -10,6 +10,7 @@ from .analysis import Analyzer
 from .fixes import FixError, apply_deletions, restore_last, safe_candidates
 from .plans import build_plan, load_reviewed_plan, require_matching_plan
 from .reporting import render_fix_json, render_fix_plan, render_json, render_pretty
+from .skill_bundle import bundled_skill_path
 
 
 def _positive_seconds(value: str) -> float:
@@ -34,6 +35,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--version", action="version", version=f"repo-gardener {__version__}"
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
+    subparsers.add_parser(
+        "skill-path", help="Print the complete portable Agent Skill directory"
+    )
     for command, help_text in [
         ("scan", "Run the supported repo-GC analysis"),
         ("stale", "Find file, symbol, duplicate, and dependency leftovers"),
@@ -131,6 +135,12 @@ def _analysis_arguments(parser: argparse.ArgumentParser) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.command == "skill-path":
+        try:
+            print(bundled_skill_path())
+        except OSError as exc:
+            return _error(str(exc))
+        return 0
     root = Path(args.path).resolve()
     if not root.is_dir():
         return _error(f"repository path does not exist: {root}")
