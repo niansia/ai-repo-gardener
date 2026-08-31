@@ -1,0 +1,237 @@
+{
+  "cases": [
+    {
+      "confidence": 1.0,
+      "finding_present": true,
+      "id": "delete-parser-old",
+      "label": "DELETE",
+      "outcome": "TP",
+      "predicted_safe_delete": true,
+      "recommendation": "safe_delete_candidate",
+      "risk": 0.0,
+      "target": "parser_old.py"
+    },
+    {
+      "confidence": 1.0,
+      "finding_present": true,
+      "id": "delete-exporter-v2",
+      "label": "DELETE",
+      "outcome": "TP",
+      "predicted_safe_delete": true,
+      "recommendation": "safe_delete_candidate",
+      "risk": 0.0,
+      "target": "exporter_v2.py"
+    },
+    {
+      "confidence": 1.0,
+      "finding_present": true,
+      "id": "delete-formatter-backup",
+      "label": "DELETE",
+      "outcome": "TP",
+      "predicted_safe_delete": true,
+      "recommendation": "safe_delete_candidate",
+      "risk": 0.0,
+      "target": "formatter_backup.py"
+    },
+    {
+      "confidence": 1.0,
+      "finding_present": true,
+      "id": "delete-loader-copy",
+      "label": "DELETE",
+      "outcome": "TP",
+      "predicted_safe_delete": true,
+      "recommendation": "safe_delete_candidate",
+      "risk": 0.0,
+      "target": "loader_copy.py"
+    },
+    {
+      "confidence": 1.0,
+      "finding_present": true,
+      "id": "delete-renderer-final",
+      "label": "DELETE",
+      "outcome": "TP",
+      "predicted_safe_delete": true,
+      "recommendation": "safe_delete_candidate",
+      "risk": 0.0,
+      "target": "renderer_final.py"
+    },
+    {
+      "confidence": 1.0,
+      "finding_present": true,
+      "id": "delete-client-new",
+      "label": "DELETE",
+      "outcome": "TP",
+      "predicted_safe_delete": true,
+      "recommendation": "safe_delete_candidate",
+      "risk": 0.0,
+      "target": "client_new.py"
+    },
+    {
+      "confidence": 1.0,
+      "finding_present": true,
+      "id": "delete-tokenizer-fixed",
+      "label": "DELETE",
+      "outcome": "TP",
+      "predicted_safe_delete": true,
+      "recommendation": "safe_delete_candidate",
+      "risk": 0.0,
+      "target": "tokenizer_fixed.py"
+    },
+    {
+      "confidence": 1.0,
+      "finding_present": true,
+      "id": "delete-mapper-v3",
+      "label": "DELETE",
+      "outcome": "TP",
+      "predicted_safe_delete": true,
+      "recommendation": "safe_delete_candidate",
+      "risk": 0.0,
+      "target": "mapper_v3.py"
+    },
+    {
+      "confidence": 1.0,
+      "finding_present": true,
+      "id": "delete-resolver-copy2",
+      "label": "DELETE",
+      "outcome": "TP",
+      "predicted_safe_delete": true,
+      "recommendation": "safe_delete_candidate",
+      "risk": 0.0,
+      "target": "resolver_copy2.py"
+    },
+    {
+      "confidence": 1.0,
+      "finding_present": true,
+      "id": "delete-validator-v4",
+      "label": "DELETE",
+      "outcome": "TP",
+      "predicted_safe_delete": true,
+      "recommendation": "safe_delete_candidate",
+      "risk": 0.0,
+      "target": "validator_v4.py"
+    },
+    {
+      "confidence": null,
+      "finding_present": false,
+      "id": "keep-docker-python-module",
+      "label": "KEEP",
+      "outcome": "TN",
+      "predicted_safe_delete": false,
+      "recommendation": null,
+      "risk": null,
+      "target": "worker_old.py"
+    },
+    {
+      "confidence": null,
+      "finding_present": false,
+      "id": "keep-compose-uvicorn-module",
+      "label": "KEEP",
+      "outcome": "TN",
+      "predicted_safe_delete": false,
+      "recommendation": null,
+      "risk": null,
+      "target": "web_old.py"
+    },
+    {
+      "confidence": null,
+      "finding_present": false,
+      "id": "keep-pyproject-entrypoint",
+      "label": "KEEP",
+      "outcome": "TN",
+      "predicted_safe_delete": false,
+      "recommendation": null,
+      "risk": null,
+      "target": "plugin_old.py"
+    },
+    {
+      "confidence": null,
+      "finding_present": false,
+      "id": "keep-runtime-import-module",
+      "label": "KEEP",
+      "outcome": "TN",
+      "predicted_safe_delete": false,
+      "recommendation": null,
+      "risk": null,
+      "target": "handler_old.py"
+    },
+    {
+      "confidence": 1.0,
+      "finding_present": true,
+      "id": "review-dynamic-deployment-command",
+      "label": "REVIEW",
+      "outcome": "TN",
+      "predicted_safe_delete": false,
+      "recommendation": "review",
+      "risk": 1.0,
+      "target": "service_old.py"
+    },
+    {
+      "confidence": 0.703,
+      "finding_present": true,
+      "id": "review-partial-replacement",
+      "label": "REVIEW",
+      "outcome": "TN",
+      "predicted_safe_delete": false,
+      "recommendation": "review",
+      "risk": 0.65,
+      "target": "parser_old.py"
+    },
+    {
+      "confidence": 0.974,
+      "finding_present": true,
+      "id": "review-public-contract-change",
+      "label": "REVIEW",
+      "outcome": "TN",
+      "predicted_safe_delete": false,
+      "recommendation": "review",
+      "risk": 0.55,
+      "target": "client_old.py"
+    },
+    {
+      "confidence": 1.0,
+      "finding_present": true,
+      "id": "review-repository-parse-error",
+      "label": "REVIEW",
+      "outcome": "TN",
+      "predicted_safe_delete": false,
+      "recommendation": "review",
+      "risk": 1.0,
+      "target": "loader_old.py"
+    },
+    {
+      "confidence": 1.0,
+      "finding_present": true,
+      "id": "review-package-public-surface",
+      "label": "REVIEW",
+      "outcome": "TN",
+      "predicted_safe_delete": false,
+      "recommendation": "review",
+      "risk": 0.45,
+      "target": "pkg/format_old.py"
+    },
+    {
+      "confidence": 1.0,
+      "finding_present": true,
+      "id": "review-eval-runtime-loader",
+      "label": "REVIEW",
+      "outcome": "TN",
+      "predicted_safe_delete": false,
+      "recommendation": "review",
+      "risk": 1.0,
+      "target": "task_old.py"
+    }
+  ],
+  "manifest": "benchmarks/labeled-corpus/manifest.json",
+  "repo_gardener_version": "0.1.0a11",
+  "schema_version": 1,
+  "summary": {
+    "cases": 20,
+    "contract_failures": 0,
+    "false_negatives": 0,
+    "false_positives": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "true_negatives": 10,
+    "true_positives": 10
+  }
+}

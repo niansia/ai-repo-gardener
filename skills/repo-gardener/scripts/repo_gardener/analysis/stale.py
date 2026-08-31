@@ -334,6 +334,12 @@ def _risk(
             "packaging_entrypoint_uncertainty:"
             + ",".join(record.packaging_uncertainty[:3])
         )
+    if record.deployment_uncertainty:
+        risk = 1.0
+        risks.append(
+            "deployment_runtime_uncertainty:"
+            + ",".join(record.deployment_uncertainty[:3])
+        )
     elif record.relative_path.startswith("src/") and not config.allow_delete_src:
         risk = max(risk, 0.25)
         risks.append("possible_external_package_module")

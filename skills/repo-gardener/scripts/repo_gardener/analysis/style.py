@@ -46,6 +46,9 @@ def style_findings(
     ]
     if not baseline_sources and len(sources) < MIN_BASELINE_FILES + 1:
         return []
+    all_records = [*sources, *baseline_sources]
+    features = {id(record): record.style.features() for record in all_records}
+    supports = {id(record): record.style.feature_supports() for record in all_records}
     findings: list[Finding] = []
     for record in sources:
         if not _eligible(record):
@@ -53,7 +56,7 @@ def style_findings(
         peers = _peers(record, sources, baseline_sources)
         if len(peers) < MIN_BASELINE_FILES:
             continue
-        unusual = _unusual_features(record, peers)
+        unusual = _unusual_features(record, peers, features, supports)
         strong = any(item["type"] in STRONG_SIGNALS for item in unusual)
         if len(unusual) >= 2 or strong:
             findings.append(
@@ -86,26 +89,27 @@ def _peers(
 
 
 def _unusual_features(
-    record: FileRecord, peers: list[FileRecord]
+    record: FileRecord,
+    peers: list[FileRecord],
+    features: dict[int, dict[str, float]],
+    supports: dict[int, dict[str, int]],
 ) -> list[dict[str, object]]:
     unusual: list[dict[str, object]] = []
-    for name, value in record.style.features().items():
+    for name, value in features[id(record)].items():
         if name == "print_calls_per_function" and (
             record.has_main_guard or record.path.stem.lower() == "cli"
         ):
             continue
-        support = record.style.feature_supports()[name]
+        support = supports[id(record)][name]
         minimum_support = FEATURE_MIN_SUPPORT.get(name, 1)
         if support < minimum_support:
             continue
         supported_peers = [
-            peer
-            for peer in peers
-            if peer.style.feature_supports()[name] >= minimum_support
+            peer for peer in peers if supports[id(peer)][name] >= minimum_support
         ]
         if len(supported_peers) < MIN_BASELINE_FILES:
             continue
-        baseline = [peer.style.features()[name] for peer in supported_peers]
+        baseline = [features[id(peer)][name] for peer in supported_peers]
         median = statistics.median(baseline)
         mad = statistics.median(abs(item - median) for item in baseline)
         scale = max(1.4826 * mad, _minimum_scale(name, median))

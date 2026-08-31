@@ -29,8 +29,9 @@ analysis is local and requires no network.
    review-only. Treat `orphan-helper`, `duplicate-implementation`, and
    `dependency-leftover` as static review evidence, never deletion permission.
    If any finding reports `repository_parse_errors` or
-   `opaque_dynamic_module_discovery`, explain that automatic deletion is
-   disabled until the uncertainty is resolved. Treat an assignment-only
+   `opaque_dynamic_module_discovery` or deployment-runtime uncertainty, explain
+   that automatic deletion is disabled until the uncertainty is resolved.
+   Treat an assignment-only
    configuration/data module or a replacement that changes public constants,
    signatures, re-exports, or class members as review-only.
 4. Inspect medium-confidence or partial replacements semantically. A matching
@@ -102,6 +103,11 @@ Framework entrypoints may be imported through aliases inside module-level
 control flow or inside an app factory. Python/tool implicit entrypoints such as
 `sitecustomize.py`, `usercustomize.py`, `noxfile.py`, `fabfile.py`,
 `locustfile.py`, and `docs/conf.py` are roots even without inbound imports.
+Deployment commands in Dockerfiles, Compose, Procfiles, systemd units, GitHub
+Actions, Render, and tox may also be runtime roots. Treat a templated module in
+`python -m`, Uvicorn/Gunicorn, Celery, Flask, or pytest command lines as opaque
+deployment reachability and never authorize automatic deletion until it is
+resolved.
 
 Applied operations create `.repo-gardener/` rollback data inside the target
 repository. Refuse a symlinked state path. Rollback restores deleted candidate

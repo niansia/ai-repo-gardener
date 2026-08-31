@@ -12,7 +12,7 @@ body:
     id: version
     attributes:
       label: Repo Gardener version
-      placeholder: 0.1.0a10
+      placeholder: 0.1.0a11
     validations:
       required: true
   - type: dropdown

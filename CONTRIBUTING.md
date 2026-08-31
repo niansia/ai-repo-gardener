@@ -30,3 +30,8 @@ The pinned real-world benchmark can be run locally with
 `python benchmarks/run_real_world.py --output benchmark-result.json`. Treat its
 timings as environment-specific and never describe review-only findings as
 automatic deletion candidates.
+
+Run `python benchmarks/run_labeled_corpus.py --output labeled-result.json` when
+changing deletion confidence, risk, reachability, or runtime-reference logic.
+Every corpus case has an explicit DELETE, KEEP, or REVIEW label; a safe-delete
+false positive or false negative fails the runner.

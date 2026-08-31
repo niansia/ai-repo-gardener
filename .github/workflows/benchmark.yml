@@ -23,10 +23,14 @@ jobs:
           python-version: "3.12"
       - name: Run pinned cold, warm, diff, structure, and style measurements
         run: python benchmarks/run_real_world.py --output benchmark-result.json
+      - name: Run labeled safe-delete precision and recall corpus
+        run: python benchmarks/run_labeled_corpus.py --output labeled-corpus-result.json
       - name: Upload machine-readable result
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: pinned-real-world-benchmark-${{ github.run_id }}
-          path: benchmark-result.json
+          path: |
+            benchmark-result.json
+            labeled-corpus-result.json
           if-no-files-found: error
           retention-days: 90

@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from ..config import Config, load_config
+from ..deployment_references import discover_deployment_references
 from ..discovery import (
     classify_path,
     discover_python_files,
@@ -35,8 +36,9 @@ class Analyzer:
         self.root = root.resolve()
         self.config: Config = load_config(self.root, config_path)
         packaging = discover_packaging_metadata(self.root, self.config)
+        deployment = discover_deployment_references(self.root, self.config)
         self.import_roots = packaging.import_roots
-        entrypoint_modules = set(packaging.entrypoint_modules)
+        entrypoint_modules = set(packaging.entrypoint_modules) | deployment.modules
         self.records = self._load_records(entrypoint_modules)
         flush_parse_cache()
         for record in self.records:
@@ -47,6 +49,8 @@ class Analyzer:
                 self.root, record.relative_path
             )
             record.packaging_uncertainty = packaging.uncertainty_sources
+            record.deployment_uncertainty = deployment.uncertainty_sources
+        self.deployment_references = deployment
         self.graph = ModuleGraph(self.records, entrypoint_modules)
 
     def report(
@@ -124,6 +128,16 @@ class Analyzer:
                 for record in self.records
                 if record.framework_entrypoints
             },
+            "deployment_runtime_references": {
+                module: list(files)
+                for module, files in self.deployment_references.references.items()
+            },
+            "deployment_reference_files": list(
+                self.deployment_references.scanned_files
+            ),
+            "deployment_reference_uncertainty": list(
+                self.deployment_references.uncertainty_sources
+            ),
             "reachable_modules": len(self.graph.reachable),
             "parse_errors": sum(
                 record.parse_error is not None for record in self.records

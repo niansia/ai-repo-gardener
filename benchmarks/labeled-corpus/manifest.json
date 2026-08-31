@@ -1,0 +1,166 @@
+{
+  "schema_version": 1,
+  "description": "Curated repository states for measuring safe-delete precision and recall.",
+  "cases": [
+    {
+      "id": "delete-parser-old",
+      "label": "DELETE",
+      "target": "parser_old.py",
+      "expected_finding": true,
+      "before": {"app.py": "import parser_old\n\nif __name__ == '__main__':\n    print(parser_old.parse('x'))\n", "parser_old.py": "def parse(value):\n    return value.strip()\n"},
+      "after": {"app.py": "import parser\n\nif __name__ == '__main__':\n    print(parser.parse('x'))\n", "parser.py": "def parse(value):\n    return value.strip()\n"}
+    },
+    {
+      "id": "delete-exporter-v2",
+      "label": "DELETE",
+      "target": "exporter_v2.py",
+      "expected_finding": true,
+      "before": {"app.py": "import exporter_v2\n\nif __name__ == '__main__':\n    print(exporter_v2.export(['x']))\n", "exporter_v2.py": "def export(items):\n    return ','.join(items)\n"},
+      "after": {"app.py": "import exporter\n\nif __name__ == '__main__':\n    print(exporter.export(['x']))\n", "exporter.py": "def export(items):\n    return ','.join(items)\n"}
+    },
+    {
+      "id": "delete-formatter-backup",
+      "label": "DELETE",
+      "target": "formatter_backup.py",
+      "expected_finding": true,
+      "before": {"app.py": "import formatter_backup\n\nif __name__ == '__main__':\n    print(formatter_backup.format_name('Ada'))\n", "formatter_backup.py": "def format_name(value):\n    return value.strip().title()\n"},
+      "after": {"app.py": "import formatter\n\nif __name__ == '__main__':\n    print(formatter.format_name('Ada'))\n", "formatter.py": "def format_name(value):\n    return value.strip().title()\n"}
+    },
+    {
+      "id": "delete-loader-copy",
+      "label": "DELETE",
+      "target": "loader_copy.py",
+      "expected_finding": true,
+      "before": {"app.py": "import loader_copy\n\nif __name__ == '__main__':\n    print(loader_copy.load('x'))\n", "loader_copy.py": "def load(value):\n    return {'value': value}\n"},
+      "after": {"app.py": "import loader\n\nif __name__ == '__main__':\n    print(loader.load('x'))\n", "loader.py": "def load(value):\n    return {'value': value}\n"}
+    },
+    {
+      "id": "delete-renderer-final",
+      "label": "DELETE",
+      "target": "renderer_final.py",
+      "expected_finding": true,
+      "before": {"app.py": "import renderer_final\n\nif __name__ == '__main__':\n    print(renderer_final.render('x'))\n", "renderer_final.py": "def render(value):\n    return f'<p>{value}</p>'\n"},
+      "after": {"app.py": "import renderer\n\nif __name__ == '__main__':\n    print(renderer.render('x'))\n", "renderer.py": "def render(value):\n    return f'<p>{value}</p>'\n"}
+    },
+    {
+      "id": "delete-client-new",
+      "label": "DELETE",
+      "target": "client_new.py",
+      "expected_finding": true,
+      "before": {"app.py": "import client_new\n\nif __name__ == '__main__':\n    print(client_new.request('/'))\n", "client_new.py": "def request(path):\n    return {'path': path, 'ok': True}\n"},
+      "after": {"app.py": "import client\n\nif __name__ == '__main__':\n    print(client.request('/'))\n", "client.py": "def request(path):\n    return {'path': path, 'ok': True}\n"}
+    },
+    {
+      "id": "delete-tokenizer-fixed",
+      "label": "DELETE",
+      "target": "tokenizer_fixed.py",
+      "expected_finding": true,
+      "before": {"app.py": "import tokenizer_fixed\n\nif __name__ == '__main__':\n    print(tokenizer_fixed.tokenize('a b'))\n", "tokenizer_fixed.py": "def tokenize(value):\n    return value.lower().split()\n"},
+      "after": {"app.py": "import tokenizer\n\nif __name__ == '__main__':\n    print(tokenizer.tokenize('a b'))\n", "tokenizer.py": "def tokenize(value):\n    return value.lower().split()\n"}
+    },
+    {
+      "id": "delete-mapper-v3",
+      "label": "DELETE",
+      "target": "mapper_v3.py",
+      "expected_finding": true,
+      "before": {"app.py": "import mapper_v3\n\nif __name__ == '__main__':\n    print(mapper_v3.map_value(2))\n", "mapper_v3.py": "def map_value(value):\n    return value * 2\n"},
+      "after": {"app.py": "import mapper\n\nif __name__ == '__main__':\n    print(mapper.map_value(2))\n", "mapper.py": "def map_value(value):\n    return value * 2\n"}
+    },
+    {
+      "id": "delete-resolver-copy2",
+      "label": "DELETE",
+      "target": "resolver_copy2.py",
+      "expected_finding": true,
+      "before": {"app.py": "import resolver_copy2\n\nif __name__ == '__main__':\n    print(resolver_copy.resolve('x'))\n", "resolver_copy2.py": "def resolve(value):\n    return value.replace('-', '_')\n"},
+      "after": {"app.py": "import resolver\n\nif __name__ == '__main__':\n    print(resolver.resolve('x'))\n", "resolver.py": "def resolve(value):\n    return value.replace('-', '_')\n"}
+    },
+    {
+      "id": "delete-validator-v4",
+      "label": "DELETE",
+      "target": "validator_v4.py",
+      "expected_finding": true,
+      "before": {"app.py": "import validator_v4\n\nif __name__ == '__main__':\n    print(validator_v4.valid('x'))\n", "validator_v4.py": "def valid(value):\n    return bool(value and value.strip())\n"},
+      "after": {"app.py": "import validator\n\nif __name__ == '__main__':\n    print(validator.valid('x'))\n", "validator.py": "def valid(value):\n    return bool(value and value.strip())\n"}
+    },
+    {
+      "id": "keep-docker-python-module",
+      "label": "KEEP",
+      "target": "worker_old.py",
+      "expected_finding": false,
+      "before": {"app.py": "import worker_old\n\nif __name__ == '__main__':\n    worker_old.run()\n", "worker_old.py": "def run():\n    return 'ok'\n", "Dockerfile": "CMD [\"python\", \"-m\", \"worker_old\"]\n"},
+      "after": {"app.py": "import worker\n\nif __name__ == '__main__':\n    worker.run()\n", "worker.py": "def run():\n    return 'ok'\n"}
+    },
+    {
+      "id": "keep-compose-uvicorn-module",
+      "label": "KEEP",
+      "target": "web_old.py",
+      "expected_finding": false,
+      "before": {"app.py": "import web_old\n\nif __name__ == '__main__':\n    print(web_old.app)\n", "web_old.py": "app = {'name': 'demo'}\n", "compose.yaml": "services:\n  web:\n    command: uvicorn web_old:app\n"},
+      "after": {"app.py": "import web\n\nif __name__ == '__main__':\n    print(web.app)\n", "web.py": "app = {'name': 'demo'}\n"}
+    },
+    {
+      "id": "keep-pyproject-entrypoint",
+      "label": "KEEP",
+      "target": "plugin_old.py",
+      "expected_finding": false,
+      "before": {"app.py": "import plugin_old\n\nif __name__ == '__main__':\n    plugin_old.run()\n", "plugin_old.py": "def run():\n    return True\n", "pyproject.toml": "[project]\nname='demo'\nversion='0.1'\n[project.entry-points.'demo.plugins']\nlegacy='plugin_old:run'\n"},
+      "after": {"app.py": "import plugin\n\nif __name__ == '__main__':\n    plugin.run()\n", "plugin.py": "def run():\n    return True\n"}
+    },
+    {
+      "id": "keep-runtime-import-module",
+      "label": "KEEP",
+      "target": "handler_old.py",
+      "expected_finding": false,
+      "before": {"app.py": "import handler_old\nfrom importlib import import_module\n\nif __name__ == '__main__':\n    import_module('handler_old').run()\n", "handler_old.py": "def run():\n    return True\n"},
+      "after": {"app.py": "import handler\nfrom importlib import import_module\n\nif __name__ == '__main__':\n    import_module('handler_old').run()\n", "handler.py": "def run():\n    return True\n"}
+    },
+    {
+      "id": "review-dynamic-deployment-command",
+      "label": "REVIEW",
+      "target": "service_old.py",
+      "expected_finding": true,
+      "before": {"app.py": "import service_old\n\nif __name__ == '__main__':\n    service_old.run()\n", "service_old.py": "def run():\n    return True\n", "Dockerfile": "CMD [\"uvicorn\", \"${APP_MODULE}:app\"]\n"},
+      "after": {"app.py": "import service\n\nif __name__ == '__main__':\n    service.run()\n", "service.py": "def run():\n    return True\n"}
+    },
+    {
+      "id": "review-partial-replacement",
+      "label": "REVIEW",
+      "target": "parser_old.py",
+      "expected_finding": true,
+      "before": {"app.py": "import parser_old\n\nif __name__ == '__main__':\n    parser_old.parse('x')\n", "parser_old.py": "def parse(value):\n    return value.strip()\n\ndef legacy(value):\n    return value.upper()\n"},
+      "after": {"app.py": "import parser\n\nif __name__ == '__main__':\n    parser.parse('x')\n", "parser.py": "def parse(value):\n    return value.strip()\n"}
+    },
+    {
+      "id": "review-public-contract-change",
+      "label": "REVIEW",
+      "target": "client_old.py",
+      "expected_finding": true,
+      "before": {"app.py": "import client_old\n\nif __name__ == '__main__':\n    client_old.fetch('/')\n", "client_old.py": "MODE = 'production'\n\ndef fetch(path, timeout=5):\n    return path\n"},
+      "after": {"app.py": "import client\n\nif __name__ == '__main__':\n    client.fetch('/')\n", "client.py": "MODE = 'development'\n\ndef fetch(path):\n    return path\n"}
+    },
+    {
+      "id": "review-repository-parse-error",
+      "label": "REVIEW",
+      "target": "loader_old.py",
+      "expected_finding": true,
+      "before": {"app.py": "import loader_old\n\nif __name__ == '__main__':\n    loader_old.load('x')\n", "loader_old.py": "def load(value):\n    return value\n"},
+      "after": {"app.py": "import loader\n\nif __name__ == '__main__':\n    loader.load('x')\n", "loader.py": "def load(value):\n    return value\n", "broken.py": "def broken(:\n    pass\n"}
+    },
+    {
+      "id": "review-package-public-surface",
+      "label": "REVIEW",
+      "target": "pkg/format_old.py",
+      "expected_finding": true,
+      "before": {"app.py": "import pkg.format_old\n\nif __name__ == '__main__':\n    pkg.format_old.clean('x')\n", "pkg/__init__.py": "", "pkg/format_old.py": "def clean(value):\n    return value.strip()\n"},
+      "after": {"app.py": "import pkg.format\n\nif __name__ == '__main__':\n    pkg.format.clean('x')\n", "pkg/format.py": "def clean(value):\n    return value.strip()\n"}
+    },
+    {
+      "id": "review-eval-runtime-loader",
+      "label": "REVIEW",
+      "target": "task_old.py",
+      "expected_finding": true,
+      "before": {"app.py": "import task_old\n\nif __name__ == '__main__':\n    task_old.run()\n", "task_old.py": "def run():\n    return True\n"},
+      "after": {"app.py": "import task\n\nif __name__ == '__main__':\n    eval(\"__import__('task_old')\")\n", "task.py": "def run():\n    return True\n"}
+    }
+  ]
+}

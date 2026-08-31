@@ -6,17 +6,7 @@ on:
       - main
     tags:
       - "v*"
-    paths:
-      - ".github/workflows/release.yml"
-      - "pyproject.toml"
-      - "skills/**"
-      - "tests/**"
   pull_request:
-    paths:
-      - ".github/workflows/release.yml"
-      - "pyproject.toml"
-      - "skills/**"
-      - "tests/**"
   workflow_dispatch:
 
 concurrency:
@@ -93,13 +83,26 @@ jobs:
           python -c "import subprocess; skill=subprocess.check_output(['repo-gardener','skill-path'], text=True).strip(); raise SystemExit(subprocess.call(['skills-ref','validate',skill]))"
       - name: Test against installed wheel outside source tree
         run: |
-          python -c "import os,pathlib,shutil,subprocess,sys; root=pathlib.Path(os.environ['RUNNER_TEMP'])/'repo-gardener-wheel-tests'; shutil.rmtree(root,ignore_errors=True); shutil.copytree('tests',root/'tests'); raise SystemExit(subprocess.call([sys.executable,'-m','pytest','-q','tests'],cwd=root))"
+          python -c "import os,pathlib,shutil,subprocess,sys; root=pathlib.Path(os.environ['RUNNER_TEMP'])/'repo-gardener-wheel-tests'; shutil.rmtree(root,ignore_errors=True); shutil.copytree('tests',root/'tests'); shutil.copytree('benchmarks',root/'benchmarks'); raise SystemExit(subprocess.call([sys.executable,'-m','pytest','-q','tests'],cwd=root))"
       - name: Dogfood installed CLI
         run: repo-gardener scan . --confidence high --fail-on high
 
+  release-candidate:
+    if: always()
+    needs: [build, test-wheel]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require the complete exact-wheel matrix
+        env:
+          BUILD_RESULT: ${{ needs.build.result }}
+          TEST_WHEEL_RESULT: ${{ needs.test-wheel.result }}
+        run: |
+          test "$BUILD_RESULT" = "success"
+          test "$TEST_WHEEL_RESULT" = "success"
+
   publish:
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [build, test-wheel]
+    needs: [build, test-wheel, release-candidate]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -121,3 +124,22 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" "dist/${{ needs.build.outputs.wheel }}" --verify-tag --prerelease --draft --generate-notes --title "$GITHUB_REF_NAME"
           gh release edit "$GITHUB_REF_NAME" --draft=false
+
+  publish-pypi:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [build, test-wheel, release-candidate]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/repo-gardener
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: release-wheel
+          path: dist
+      - name: Publish the same tested wheel to PyPI
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: dist

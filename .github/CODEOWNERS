@@ -3,5 +3,8 @@
 /skills/repo-gardener/scripts/repo_gardener/fixes.py @niansia
 /skills/repo-gardener/scripts/repo_gardener/parsing.py @niansia
 /skills/repo-gardener/scripts/repo_gardener/runtime_references.py @niansia
+/skills/repo-gardener/scripts/repo_gardener/deployment_references.py @niansia
+/benchmarks/labeled-corpus/ @niansia
+/benchmarks/run_labeled_corpus.py @niansia
 /.github/workflows/ @niansia
 /pyproject.toml @niansia

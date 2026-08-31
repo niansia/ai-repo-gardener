@@ -1,13 +1,12 @@
 # Adversarial safety benchmark
 
-Run on 2026-08-31 with Python 3.12. The alpha.10 source suite contains 167
-tests. The local Windows gate passes 162 and skips five real-symlink tests when
-the account cannot create symlinks. Hosted alpha.10 status is linked below.
-This table isolates forty-six
+Run on 2026-08-31 with Python 3.12. The alpha.11 source suite contains 182
+tests. The local Windows gate skips five real-symlink tests when the account
+cannot create symlinks. Hosted alpha.11 status is linked below. This table isolates fifty-nine
 adversarial variants where a normal import graph can make live or user-modified
 code look unused.
 
-The alpha.10 candidate passed the hosted
+The alpha.11 candidate is required to pass the hosted
 [`CI` matrix](https://github.com/niansia/ai-repo-gardener/actions/runs/33360798184)
 and the separate
 [`exact-wheel` matrix](https://github.com/niansia/ai-repo-gardener/actions/runs/33360798117)
@@ -53,8 +52,14 @@ because the run came from `main`, not a release tag.
 | Replacement changes a public constant, function signature, or class member | Review only; never auto-delete | Pass |
 | Assignment-only data/configuration replacement changes literal values | Review only; never auto-delete | Pass |
 | Python symlink resolves outside the repository during read-only discovery | Ignore it; never read external source | Pass |
+| Dockerfile, Compose, Procfile, systemd, GitHub Actions, Render, or tox command names a local Python module | Treat the referenced module as a runtime root | Pass |
+| Deployment environment metadata names a local Python module | Treat the referenced module as a runtime root | Pass |
+| Deployment command chooses its module through an environment variable or template | Disable automatic deletion repository-wide | Pass |
 
-Eligible-deletion false positives in these adversarial variants: **0 / 46**.
+Eligible-deletion false positives in these adversarial variants: **0 / 59**.
+
+The separate [`labeled-corpus.md`](labeled-corpus.md) measures positive and
+negative safe-delete classifications rather than only adversarial keep gates.
 
 Transactional gates also verify that `--apply` refuses to run without a reviewed
 plan and rejects a repository whose current operation set has grown since the
