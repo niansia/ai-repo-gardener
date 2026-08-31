@@ -4,9 +4,10 @@
 
 AI Repo Gardener is a deterministic garbage collector for AI-edited Python
 repositories. The package, CLI, and portable Skill keep the concise
-`repo-gardener` identifier. Version `0.1.0a6` focuses on one job: finding
-superseded iteration files and newly-created orphan files without turning weak
-guesses into deletions.
+`repo-gardener` identifier. Version `0.1.0a7` covers three evidence systems:
+repository garbage collection, folder-architecture pressure, and
+baseline-relative Python house-style drift. Weak guesses never become
+automatic deletions or automatic moves.
 
 ![AI Repo Gardener diff and safe dry-run demo](docs/demo.gif)
 
@@ -34,6 +35,15 @@ committed range.
 - `orphan-file`: a file changed in the current iteration is unreachable, has
   zero inbound imports, and has no plausible replacement. This is always
   review-only.
+- `orphan-helper`: an unreferenced top-level helper, with private/exported/API
+  boundaries kept explicit. This is always review-only.
+- `duplicate-implementation`: substantial top-level functions with an exact
+  normalized-AST match across files. It proposes consolidation review, never
+  deletion.
+- `dependency-leftover`: a runtime dependency declared by `pyproject.toml`,
+  `requirements.txt`, `requirements/*.txt`, `setup.cfg`, or literal
+  `setup.py`, with no matching static/runtime import. Distribution/import-name
+  uncertainty remains visible and the result is review-only.
 - Safe deletion: isolated-copy validation before mutation, snapshot, SHA-256
   verification, symlink and path-escape refusal, stale-plan rejection, and
   manual restore. Apply remains experimental.
@@ -50,8 +60,9 @@ committed range.
 - Python standard library only at runtime; no model call, account, telemetry,
   API key, or network access.
 
-This is not a generic dead-code scanner and does not yet collect unused helper
-functions, unused dependencies, or arbitrary duplicate implementations.
+The symbol and dependency rules are deliberately conservative static evidence,
+not proof that a public API, plugin dependency, CLI tool, or reflective caller
+is unused.
 
 ## Try the alpha
 
@@ -93,7 +104,7 @@ follows the open [Agent Skills specification](https://agentskills.io/specificati
 | Command | Purpose | Mutation |
 | --- | --- | --- |
 | `scan` | Run the supported repo-GC rules | Never |
-| `stale` | Find superseded Python files | Never |
+| `stale` | Run file-, symbol-, duplicate-, and dependency-level repo GC | Never |
 | `diff [--base <ref>]` | Audit committed, worktree, staged, and untracked iteration changes; base defaults to `HEAD` | Never |
 | `fix [--base <ref>] --dry-run` | Preview matching high-confidence deletions; base defaults to `HEAD` | Never |
 | `fix [--base <ref>] --dry-run --format json` | Emit the reviewed plan contract | Never |
@@ -103,17 +114,18 @@ follows the open [Agent Skills specification](https://agentskills.io/specificati
 | `style --baseline <ref-or-date>` | Run experimental repo-relative Python style analysis | Never |
 | `scan --experimental` | Add structure and style to a full scan | Never |
 
-### Experimental analyzers
+### Review-only architecture and style analyzers
 
-Structure and style are available for research, but they are not part of the
-v0.1 release claim and do not run in `scan` or `diff` unless
-`--experimental` is supplied.
+Structure and style remain opt-in and non-mutating. They do not run in `scan`
+or `diff` unless `--experimental` is supplied.
 
-Structure findings report directory load and only expose cluster proposals when
-the import graph yields at least two credible groups. One giant connected
-component is not presented as an architecture plan. A directory over the
-configured module threshold is still reported as a factual load warning even
-when no reliable clusters exist.
+Structure reports a deterministic 0–100 pressure score with flatness,
+directory load, cohesion, generic-module pressure, and domain-fragmentation
+factors. Domain affinity combines imports, recent Git co-change history, and
+symbol vocabulary. Credible partitions include a target folder, exact file
+moves, importer rewrite count, string-reference evidence, and risk. Plans set
+`apply_supported: false`; one giant connected component is still reported only
+as factual directory load rather than a fabricated partition.
 
 Style findings are deviations from a baseline, never proof of AI authorship.
 For repositories already dominated by generated code, provide a pre-AI commit
@@ -127,8 +139,11 @@ repo-gardener style . --baseline 2026-01-15 --confidence all
 The extractor includes Python-specific conventions: builtin vs `typing`
 generics, `X | None` vs `Optional[X]`, `Path` vs `os.path`, comprehension vs
 manual-loop preference, dataclass/TypedDict vs bare dictionaries, and logging
-vs `print`. Fewer than five baseline files produces no finding; fewer than 20
-cannot produce high confidence.
+vs `print`. It also measures branch/cyclomatic complexity, private-helper
+ratio, snake-case function naming, and function-name word count. Ratio features
+carry their observation support; low-support conventions such as one `Path`
+call are excluded before scoring. Fewer than five supported baseline files
+produces no finding; fewer than 20 cannot produce high confidence.
 
 ## Safety and configuration
 
@@ -184,7 +199,7 @@ by default. Prefer explicit `--validate` arguments. `--trust-repo-config` is an
 opt-in to execute commands supplied by that repository and should only be used
 after review. Validation runs against an isolated copy where the planned
 candidate files have already been removed. Only after validation succeeds does
-AI Repo Gardener reverifies the original hashes and performs the real deletion.
+AI Repo Gardener reverify the original hashes and perform the real deletion.
 Relative-path validation side effects stay in the disposable copy. This is not
 a command sandbox: commands that address absolute paths or external services
 can still affect them. Each command has a 300-second default timeout; set a
@@ -209,8 +224,9 @@ The JSON contract is documented in
 ## Alpha limits
 
 The fixture suite covers stale replacements, partial replacements, dynamic
-string paths, plugins, literal `src.*` imports, agent-created orphans, rename
-chronology, style baselines, and flat-domain examples. Public-repository
+string paths, plugins, literal `src.*` imports, file and helper orphans,
+duplicate implementations, dependency leftovers, rename chronology, style
+support/baselines, co-change affinity, entropy, and move-plan examples. Public-repository
 smoke results and exact commit hashes are recorded in
 [`benchmarks/real-world-smoke.md`](benchmarks/real-world-smoke.md). That run is
 not a labeled precision benchmark. The separate adversarial safety gate is

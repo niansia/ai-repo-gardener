@@ -9,6 +9,7 @@ FIXTURE_ROOT = Path(__file__).parent / "fixtures"
 REQUIRED_FIXTURES = {
     "agent_diff_orphan",
     "false_positive_plugin",
+    "extended_gc_rules",
     "flat_four_domains",
     "monkeypatch_string_path",
     "partial_replacement",

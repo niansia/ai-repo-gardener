@@ -9,9 +9,20 @@ STRONG_SIGNALS = {
     "narration_comments_per_100_loc",
     "broad_exceptions_per_function",
     "nested_dicts_per_function",
+    "mean_cyclomatic_complexity",
 }
 MIN_BASELINE_FILES = 5
 HIGH_CONFIDENCE_BASELINE_FILES = 20
+FEATURE_MIN_SUPPORT = {
+    "builtin_generic_ratio": 2,
+    "pep604_union_ratio": 2,
+    "pathlib_ratio": 3,
+    "comprehension_ratio": 3,
+    "structured_model_ratio": 2,
+    "print_share_of_output_calls": 3,
+    "private_helper_ratio": 3,
+    "snake_case_function_ratio": 3,
+}
 
 
 def style_findings(
@@ -81,7 +92,18 @@ def _unusual_features(
             record.has_main_guard or record.path.stem.lower() == "cli"
         ):
             continue
-        baseline = [peer.style.features()[name] for peer in peers]
+        support = record.style.feature_supports()[name]
+        minimum_support = FEATURE_MIN_SUPPORT.get(name, 1)
+        if support < minimum_support:
+            continue
+        supported_peers = [
+            peer
+            for peer in peers
+            if peer.style.feature_supports()[name] >= minimum_support
+        ]
+        if len(supported_peers) < MIN_BASELINE_FILES:
+            continue
+        baseline = [peer.style.features()[name] for peer in supported_peers]
         median = statistics.median(baseline)
         mad = statistics.median(abs(item - median) for item in baseline)
         scale = max(1.4826 * mad, _minimum_scale(name, median))
@@ -98,6 +120,8 @@ def _unusual_features(
                     "value": round(value, 3),
                     "baseline_median": round(median, 3),
                     "robust_z": round(z_score, 2),
+                    "support": support,
+                    "baseline_supported_files": len(supported_peers),
                 }
             )
     return unusual
@@ -140,6 +164,8 @@ def _minimum_scale(name: str, median: float) -> float:
         return max(0.35, abs(median) * 0.15)
     if "per_function" in name or name == "annotation_density":
         return max(0.25, abs(median) * 0.15)
+    if name == "function_name_words_mean":
+        return max(0.5, abs(median) * 0.15)
     return max(1.0, abs(median) * 0.15)
 
 
@@ -164,6 +190,12 @@ def _rare_threshold(name: str) -> float:
         "structured_model_ratio": 0.75,
         "bare_dict_models_per_function": 0.5,
         "print_share_of_output_calls": 0.75,
+        "branch_points_per_function": 5.0,
+        "mean_cyclomatic_complexity": 6.0,
+        "high_complexity_function_ratio": 0.4,
+        "private_helper_ratio": 0.75,
+        "snake_case_function_ratio": 0.75,
+        "function_name_words_mean": 4.0,
     }[name]
 
 
@@ -188,4 +220,10 @@ def _minimum_effect(name: str) -> float:
         "structured_model_ratio": 0.35,
         "bare_dict_models_per_function": 0.5,
         "print_share_of_output_calls": 0.35,
+        "branch_points_per_function": 2.0,
+        "mean_cyclomatic_complexity": 2.0,
+        "high_complexity_function_ratio": 0.3,
+        "private_helper_ratio": 0.4,
+        "snake_case_function_ratio": 0.35,
+        "function_name_words_mean": 1.5,
     }[name]

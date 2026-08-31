@@ -36,6 +36,9 @@ def render_pretty(report: Report, confidence: str) -> str:
         lines.append(
             f"Iteration base: {report.base}  Changed files: {data['metrics'].get('changed_files', 0)}"
         )
+    structure = data["metrics"].get("structure_entropy")
+    if isinstance(structure, dict):
+        lines.append(f"Structure entropy: {structure.get('score', 0):.1f}/100")
     lines.append("")
     if not data["findings"]:
         lines.append("No findings at the selected confidence level.")
@@ -114,8 +117,12 @@ def _tier(confidence: float) -> str:
 
 
 def _compact(value: Any, evidence: dict[str, Any]) -> str:
-    if isinstance(value, list):
+    if isinstance(value, (dict, list)):
         return json.dumps(value, ensure_ascii=False, sort_keys=True)
     if "baseline_median" in evidence:
-        return f"{value} (baseline {evidence['baseline_median']}, robust z {evidence['robust_z']})"
+        support = f", support {evidence['support']}" if "support" in evidence else ""
+        return (
+            f"{value} (baseline {evidence['baseline_median']}, "
+            f"robust z {evidence['robust_z']}{support})"
+        )
     return str(value)

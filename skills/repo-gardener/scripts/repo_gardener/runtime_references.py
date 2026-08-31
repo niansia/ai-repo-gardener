@@ -4,6 +4,8 @@ import ast
 import re
 from dataclasses import dataclass
 
+from .ast_utils import dotted_name
+
 MODULE_REFERENCE = re.compile(
     r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*(?::[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)?"
 )
@@ -21,6 +23,7 @@ class RuntimeReferenceScanner:
 
     def __init__(self, tree: ast.Module):
         self.tree = tree
+        self._nodes = tuple(ast.walk(tree))
         self._assignment_cache: list[tuple[list[str], str]] | None = None
 
     def scan(self) -> RuntimeReferences:
@@ -41,10 +44,10 @@ class RuntimeReferenceScanner:
             dynamic_calls | discovery_calls | execution_calls | file_loader_calls
         )
         opaque = self._dangerous_callable_escapes(dangerous_callables)
-        for node in ast.walk(self.tree):
+        for node in self._nodes:
             if not isinstance(node, ast.Call):
                 continue
-            name = _call_name(node.func)
+            name = dotted_name(node.func)
             if name in execution_calls or name in file_loader_calls:
                 opaque = True
                 continue
@@ -108,7 +111,7 @@ class RuntimeReferenceScanner:
         pkgutil_discovery_aliases: set[str] = set()
         pkg_resources_aliases = {"pkg_resources"}
         pkg_resources_discovery_aliases: set[str] = set()
-        for node in ast.walk(self.tree):
+        for node in self._nodes:
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     if alias.name == "importlib":
@@ -278,10 +281,10 @@ class RuntimeReferenceScanner:
         )
 
     def _dangerous_callable_escapes(self, known: set[str]) -> bool:
-        for node in ast.walk(self.tree):
+        for node in self._nodes:
             if isinstance(node, ast.Assign):
                 if _contains_callable_value(node.value, known) and not (
-                    _call_name(node.value) in known
+                    dotted_name(node.value) in known
                     and all(isinstance(target, ast.Name) for target in node.targets)
                 ):
                     return True
@@ -290,7 +293,7 @@ class RuntimeReferenceScanner:
                     node.value is not None
                     and _contains_callable_value(node.value, known)
                     and not (
-                        _call_name(node.value) in known
+                        dotted_name(node.value) in known
                         and isinstance(node.target, ast.Name)
                     )
                 ):
@@ -335,22 +338,22 @@ class RuntimeReferenceScanner:
         if self._assignment_cache is not None:
             return self._assignment_cache
         assignments: list[tuple[list[str], str]] = []
-        for node in ast.walk(self.tree):
+        for node in self._nodes:
             if isinstance(node, ast.Assign):
                 targets = [
                     target.id for target in node.targets if isinstance(target, ast.Name)
                 ]
-                assignments.append((targets, _call_name(node.value)))
+                assignments.append((targets, dotted_name(node.value)))
             elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
                 assignments.append(
-                    ([node.target.id], _call_name(node.value) if node.value else "")
+                    ([node.target.id], dotted_name(node.value) if node.value else "")
                 )
         self._assignment_cache = assignments
         return assignments
 
     def _module_shaped_strings(self) -> set[str]:
         modules: set[str] = set()
-        for node in ast.walk(self.tree):
+        for node in self._nodes:
             reference = _module_reference(node)
             if reference:
                 modules.add(reference)
@@ -366,18 +369,9 @@ def _module_reference(node: ast.AST) -> str | None:
     return value.split(":", 1)[0]
 
 
-def _call_name(node: ast.AST) -> str:
-    if isinstance(node, ast.Name):
-        return node.id
-    if isinstance(node, ast.Attribute):
-        prefix = _call_name(node.value)
-        return f"{prefix}.{node.attr}" if prefix else node.attr
-    return ""
-
-
 def _contains_callable_value(node: ast.AST, known: set[str]) -> bool:
     """Return whether a value stores or transports a known dangerous callable."""
-    if _call_name(node) in known:
+    if dotted_name(node) in known:
         return True
     if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
         return any(_contains_callable_value(item, known) for item in node.elts)
@@ -396,7 +390,7 @@ def _contains_callable_value(node: ast.AST, known: set[str]) -> bool:
 
 
 def _is_loader_reflection(node: ast.Call, owners: set[str]) -> bool:
-    if len(node.args) < 2 or _call_name(node.args[0]) not in owners:
+    if len(node.args) < 2 or dotted_name(node.args[0]) not in owners:
         return False
     attribute = node.args[1]
     if not isinstance(attribute, ast.Constant) or not isinstance(attribute.value, str):

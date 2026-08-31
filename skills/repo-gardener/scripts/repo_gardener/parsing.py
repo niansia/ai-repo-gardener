@@ -7,9 +7,11 @@ import re
 import statistics
 import tokenize
 from collections import Counter
+from hashlib import sha256
 from pathlib import Path
 
-from .models import FileRecord, ImportRef, StyleMetrics
+from .ast_utils import dotted_name
+from .models import FileRecord, ImportRef, StyleMetrics, SymbolRecord
 from .runtime_references import RuntimeReferenceScanner
 
 NARRATION_PREFIXES = (
@@ -39,6 +41,7 @@ TEMPORARY_NAMES = {
     "final_result",
 }
 WORD_RE = re.compile(r"[A-Za-z][A-Za-z0-9_]+")
+SNAKE_CASE_RE = re.compile(r"^_?[a-z][a-z0-9_]*$")
 
 
 def parse_file(
@@ -88,12 +91,11 @@ def parse_source(
         record.style.loc = len(source.splitlines())
         return record
 
+    record.tree = tree
     record.imports = _imports(tree, module, path.name == "__init__.py")
-    record.symbols = {
-        node.name
-        for node in ast.iter_child_nodes(tree)
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
-    }
+    record.symbol_details = _symbol_details(tree)
+    record.symbols = {symbol.name for symbol in record.symbol_details}
+    record.exported_symbols = _public_exports(tree)
     runtime_references = RuntimeReferenceScanner(tree).scan()
     record.dynamic_refs = set(runtime_references.modules)
     record.runtime_string_refs = set(runtime_references.possible_modules)
@@ -112,9 +114,8 @@ def parse_source(
 def populate_style(record: FileRecord) -> None:
     if record.parse_error or record.style.loc:
         return
-    try:
-        tree = ast.parse(record.source, filename=record.relative_path)
-    except SyntaxError:
+    tree = record.tree
+    if tree is None:
         return
     record.style = _style_metrics(tree, record.source)
 
@@ -178,15 +179,6 @@ def _resolve_relative(current: str, imported: str, level: int, is_package: bool)
     return ".".join(part for part in parts if part)
 
 
-def _call_name(node: ast.AST) -> str:
-    if isinstance(node, ast.Name):
-        return node.id
-    if isinstance(node, ast.Attribute):
-        prefix = _call_name(node.value)
-        return f"{prefix}.{node.attr}" if prefix else node.attr
-    return ""
-
-
 def _has_main_guard(tree: ast.Module) -> bool:
     for node in tree.body:
         if not isinstance(node, ast.If) or not isinstance(node.test, ast.Compare):
@@ -209,7 +201,7 @@ def _framework_entrypoints(tree: ast.Module, relative_path: str) -> tuple[str, .
     }
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
-            framework = constructors.get(_call_name(node.func))
+            framework = constructors.get(dotted_name(node.func))
             if framework:
                 frameworks.add(framework)
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -233,6 +225,103 @@ def _declares_public_api(tree: ast.Module) -> bool:
             if isinstance(target, ast.Name) and target.id == "__all__":
                 return True
     return False
+
+
+def _public_exports(tree: ast.Module) -> set[str]:
+    exports: set[str] = set()
+    for node in tree.body:
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+            continue
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        if not any(
+            isinstance(target, ast.Name) and target.id == "__all__"
+            for target in targets
+        ):
+            continue
+        value = node.value
+        if not isinstance(value, (ast.List, ast.Tuple, ast.Set)):
+            continue
+        exports.update(
+            item.value
+            for item in value.elts
+            if isinstance(item, ast.Constant) and isinstance(item.value, str)
+        )
+    return exports
+
+
+def _symbol_details(tree: ast.Module) -> tuple[SymbolRecord, ...]:
+    details: list[SymbolRecord] = []
+    for node in tree.body:
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        tokens = (
+            list(_normalized_symbol_tokens(node))
+            if not isinstance(node, ast.ClassDef)
+            else []
+        )
+        payload = "\x1f".join(tokens)
+        details.append(
+            SymbolRecord(
+                name=node.name,
+                kind="class" if isinstance(node, ast.ClassDef) else "function",
+                lineno=node.lineno,
+                end_lineno=node.end_lineno or node.lineno,
+                private=node.name.startswith("_") and not node.name.startswith("__"),
+                decorated=bool(node.decorator_list),
+                normalized_body_hash=(
+                    sha256(payload.encode("utf-8")).hexdigest() if payload else ""
+                ),
+                body_nodes=sum(token.startswith("node:") for token in tokens),
+                parameter_count=(
+                    0
+                    if isinstance(node, ast.ClassDef)
+                    else len(node.args.posonlyargs)
+                    + len(node.args.args)
+                    + len(node.args.kwonlyargs)
+                ),
+            )
+        )
+    return tuple(details)
+
+
+def _normalized_symbol_tokens(value: object, field_name: str = ""):
+    if isinstance(value, ast.Constant):
+        yield "node:Constant"
+        if value.value is None or isinstance(value.value, bool):
+            yield repr(value.value)
+        else:
+            yield f"constant:{type(value.value).__name__}"
+        return
+    if isinstance(value, ast.AST):
+        yield f"node:{type(value).__name__}"
+        for child_field, child in ast.iter_fields(value):
+            if child_field == "decorator_list":
+                continue
+            yield f"field:{child_field}"
+            if (
+                child_field == "id"
+                and isinstance(value, ast.Name)
+                or child_field == "arg"
+                and isinstance(value, ast.arg)
+                or child_field == "name"
+                and isinstance(
+                    value, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+                )
+                or child_field == "asname"
+            ):
+                yield "<identifier>"
+            else:
+                yield from _normalized_symbol_tokens(child, child_field)
+        return
+    if isinstance(value, list):
+        yield f"list:{len(value)}"
+        for item in value:
+            yield from _normalized_symbol_tokens(item, field_name)
+        return
+    if isinstance(value, str):
+        yield value
+    elif value is not None:
+        yield repr(value)
 
 
 def _vocabulary(module: str, symbols: set[str]) -> set[str]:
@@ -297,6 +386,12 @@ def _style_metrics(tree: ast.Module, source: str) -> StyleMetrics:
     function_lengths = [
         max(1, (node.end_lineno or node.lineno) - node.lineno + 1) for node in functions
     ]
+    top_level_functions = [
+        node
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    ]
+    complexities = [_function_complexity(node) for node in functions]
     docstring_lines = 0
     for node in [
         *functions,
@@ -357,13 +452,14 @@ def _style_metrics(tree: ast.Module, source: str) -> StyleMetrics:
         for annotation in annotation_nodes
         for node in ast.walk(annotation)
         if isinstance(node, ast.Subscript)
-        and _call_name(node.value) in builtin_generics
+        and dotted_name(node.value) in builtin_generics
     )
     legacy_generic_annotations = sum(
         1
         for annotation in annotation_nodes
         for node in ast.walk(annotation)
-        if isinstance(node, ast.Subscript) and _call_name(node.value) in legacy_generics
+        if isinstance(node, ast.Subscript)
+        and dotted_name(node.value) in legacy_generics
     )
     pep604_unions = sum(
         1
@@ -375,20 +471,20 @@ def _style_metrics(tree: ast.Module, source: str) -> StyleMetrics:
         1
         for annotation in annotation_nodes
         for node in ast.walk(annotation)
-        if isinstance(node, ast.Subscript) and _call_name(node.value) in legacy_unions
+        if isinstance(node, ast.Subscript) and dotted_name(node.value) in legacy_unions
     )
     calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
-    os_path_uses = sum(_call_name(node.func).startswith("os.path.") for node in calls)
+    os_path_uses = sum(dotted_name(node.func).startswith("os.path.") for node in calls)
     pathlib_uses = sum(
-        _call_name(node.func) in {"Path", "pathlib.Path"} for node in calls
+        dotted_name(node.func) in {"Path", "pathlib.Path"} for node in calls
     )
     logging_methods = {"debug", "info", "warning", "error", "exception", "critical"}
     logging_calls = sum(
-        _call_name(node.func).startswith("logging.")
+        dotted_name(node.func).startswith("logging.")
         or (
             isinstance(node.func, ast.Attribute)
             and node.func.attr in logging_methods
-            and _call_name(node.func.value).lower() in {"log", "logger"}
+            and dotted_name(node.func.value).lower() in {"log", "logger"}
         )
         for node in calls
     )
@@ -409,7 +505,7 @@ def _style_metrics(tree: ast.Module, source: str) -> StyleMetrics:
         for annotation in annotation_nodes
         for node in ast.walk(annotation)
         if isinstance(node, ast.Subscript)
-        and _call_name(node.value) in {"dict", "Dict", "typing.Dict"}
+        and dotted_name(node.value) in {"dict", "Dict", "typing.Dict"}
     )
     return StyleMetrics(
         loc=len(lines),
@@ -434,7 +530,7 @@ def _style_metrics(tree: ast.Module, source: str) -> StyleMetrics:
         print_calls=sum(
             1
             for node in ast.walk(tree)
-            if isinstance(node, ast.Call) and _call_name(node.func) == "print"
+            if isinstance(node, ast.Call) and dotted_name(node.func) == "print"
         ),
         nested_dicts=sum(
             1
@@ -460,6 +556,18 @@ def _style_metrics(tree: ast.Module, source: str) -> StyleMetrics:
         structured_models=structured_models,
         bare_dict_annotations=bare_dict_annotations,
         logging_calls=logging_calls,
+        branch_points=sum(max(0, complexity - 1) for complexity in complexities),
+        cyclomatic_complexity=sum(complexities),
+        high_complexity_functions=sum(complexity >= 10 for complexity in complexities),
+        top_level_functions=len(top_level_functions),
+        private_helpers=sum(
+            node.name.startswith("_") and not node.name.startswith("__")
+            for node in top_level_functions
+        ),
+        snake_case_functions=sum(
+            bool(SNAKE_CASE_RE.fullmatch(node.name)) for node in functions
+        ),
+        function_name_words=sum(_name_word_count(node.name) for node in functions),
     )
 
 
@@ -489,7 +597,7 @@ def _annotation_nodes(tree: ast.Module) -> list[ast.AST]:
 
 def _is_structured_model(node: ast.ClassDef) -> bool:
     decorators = {_decorator_name(decorator) for decorator in node.decorator_list}
-    bases = {_call_name(base) for base in node.bases}
+    bases = {dotted_name(base) for base in node.bases}
     return bool(
         decorators & {"dataclass", "dataclasses.dataclass"}
         or bases & {"TypedDict", "typing.TypedDict"}
@@ -497,4 +605,25 @@ def _is_structured_model(node: ast.ClassDef) -> bool:
 
 
 def _decorator_name(node: ast.AST) -> str:
-    return _call_name(node.func) if isinstance(node, ast.Call) else _call_name(node)
+    return dotted_name(node.func) if isinstance(node, ast.Call) else dotted_name(node)
+
+
+def _function_complexity(node: ast.FunctionDef | ast.AsyncFunctionDef) -> int:
+    complexity = 1
+    for child in ast.walk(node):
+        if isinstance(child, (ast.If, ast.For, ast.AsyncFor, ast.While, ast.IfExp)):
+            complexity += 1
+        elif isinstance(child, ast.BoolOp):
+            complexity += max(1, len(child.values) - 1)
+        elif isinstance(child, ast.Try):
+            complexity += len(child.handlers) + bool(child.orelse)
+        elif isinstance(child, ast.Match):
+            complexity += max(1, len(child.cases) - 1)
+        elif isinstance(child, ast.comprehension):
+            complexity += len(child.ifs)
+    return complexity
+
+
+def _name_word_count(name: str) -> int:
+    expanded = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name.strip("_"))
+    return max(1, len([part for part in expanded.split("_") if part]))

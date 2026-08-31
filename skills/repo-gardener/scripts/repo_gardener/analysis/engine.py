@@ -11,6 +11,7 @@ from ..discovery import (
     module_names,
 )
 from ..git_support import (
+    change_coupling,
     changed_paths,
     import_migrations,
     is_git_repository,
@@ -22,9 +23,11 @@ from ..graph import ModuleGraph
 from ..models import FileRecord, Finding, Report
 from ..packaging_metadata import discover_packaging_metadata
 from ..parsing import parse_file, parse_source, populate_style
+from .dependencies import dependency_leftover_findings
 from .stale import stale_findings
-from .structure import structure_findings
+from .structure import StructureAnalysis, analyze_structure
 from .style import style_findings
+from .symbols import symbol_gc_findings
 
 
 class Analyzer:
@@ -84,7 +87,29 @@ class Analyzer:
                     f"style baseline is not a commit or resolvable date: {style_baseline}"
                 )
             baseline_records = self._load_historical_records(baseline_commit)
-        findings = self._run_modes(modes, migrations, changed, baseline_records)
+        structure_analysis = None
+        if "structure" in modes:
+            source_paths = {
+                record.relative_path
+                for record in self.records
+                if record.category == "source"
+            }
+            affinity = (
+                change_coupling(self.root, source_paths) if repository_has_git else {}
+            )
+            structure_analysis = analyze_structure(
+                self.records,
+                self.graph,
+                self.config,
+                affinity,
+            )
+        findings = self._run_modes(
+            modes,
+            migrations,
+            changed,
+            baseline_records,
+            structure_analysis,
+        )
         if command == "diff":
             findings = _scope_to_diff(findings, changed)
         metrics = {
@@ -110,6 +135,8 @@ class Analyzer:
             metrics["style_baseline_mode"] = (
                 "pre-ai-git" if baseline_commit else "repository-peers"
             )
+        if structure_analysis is not None:
+            metrics["structure_entropy"] = structure_analysis.metrics
         return Report(
             command=command,
             root=self.root,
@@ -184,6 +211,7 @@ class Analyzer:
         migrations,
         changed: set[str],
         baseline_records: list[FileRecord],
+        structure_analysis: StructureAnalysis | None,
     ) -> list[Finding]:
         findings: list[Finding] = []
         if "stale" in modes:
@@ -197,8 +225,19 @@ class Analyzer:
                     changed,
                 )
             )
+            findings.extend(symbol_gc_findings(self.records, self.graph, changed))
+            findings.extend(
+                dependency_leftover_findings(
+                    self.root,
+                    self.records,
+                    changed,
+                    migrations,
+                )
+            )
         if "structure" in modes:
-            findings.extend(structure_findings(self.records, self.graph, self.config))
+            findings.extend(
+                structure_analysis.findings if structure_analysis is not None else []
+            )
         if "style" in modes:
             findings.extend(style_findings(self.records, baseline_records))
         return findings
@@ -218,7 +257,14 @@ def _scope_to_diff(findings: list[Finding], changed: set[str]) -> list[Finding]:
         migration = any(
             item.get("type") == "call_site_migration" for item in finding.evidence
         )
-        if direct or under_directory or migration:
+        related = any(
+            changed_path in item.get("value", [])
+            for item in finding.evidence
+            if item.get("type") == "related_changed_paths"
+            and isinstance(item.get("value"), list)
+            for changed_path in changed
+        )
+        if direct or under_directory or migration or related:
             scoped.append(finding)
     return scoped
 

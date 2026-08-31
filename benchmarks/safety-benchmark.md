@@ -1,9 +1,10 @@
 # Adversarial safety benchmark
 
-Run on 2026-08-31 with Python 3.12. The suite passes 98 tests on Windows, where
-three real-symlink tests are skipped when the account cannot create symlinks,
-and all 101 tests on Linux. This table isolates twenty-four cases where a normal
-import graph can make live or user-modified code look unused.
+Run on 2026-08-31 with Python 3.12. The alpha.7 suite contains 112 tests. The
+local Windows gate passes 109 and skips three real-symlink tests when the
+account cannot create symlinks. Linux and macOS alpha.7 status must come from
+the hosted matrix after push. This table isolates twenty-four cases where a
+normal import graph can make live or user-modified code look unused.
 
 | Scenario | Required outcome | Result |
 | --- | --- | --- |

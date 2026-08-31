@@ -5,7 +5,9 @@ import os
 import shutil
 import subprocess
 import tarfile
+from collections import Counter
 from dataclasses import dataclass
+from itertools import combinations
 from pathlib import Path
 
 from .discovery import module_names
@@ -146,6 +148,51 @@ def python_sources_at_commit(root: Path, commit: str) -> dict[str, str]:
     except tarfile.TarError:
         return {}
     return dict(sorted(sources.items()))
+
+
+def change_coupling(
+    root: Path, relative_paths: set[str], limit: int = 100
+) -> dict[tuple[str, str], float]:
+    """Return deterministic recent-history co-change affinity for Python paths."""
+    if not relative_paths:
+        return {}
+    output = _run(
+        root,
+        [
+            "log",
+            f"-n{limit}",
+            "--name-only",
+            "--format=format:__RG_COMMIT__",
+            "--",
+        ],
+    )
+    if not output:
+        return {}
+    commits: list[set[str]] = []
+    current: set[str] = set()
+    for raw_line in output.splitlines():
+        line = raw_line.strip().replace("\\", "/")
+        if line == "__RG_COMMIT__":
+            if current:
+                commits.append(current)
+            current = set()
+        elif line in relative_paths:
+            current.add(line)
+    if current:
+        commits.append(current)
+
+    file_counts: Counter[str] = Counter()
+    pair_counts: Counter[tuple[str, str]] = Counter()
+    for paths in commits:
+        if len(paths) > 100:
+            continue
+        file_counts.update(paths)
+        pair_counts.update(combinations(sorted(paths), 2))
+    return {
+        pair: round(count / min(file_counts[pair[0]], file_counts[pair[1]]), 3)
+        for pair, count in pair_counts.items()
+        if count >= 2 and min(file_counts[pair[0]], file_counts[pair[1]]) >= 2
+    }
 
 
 def _run(root: Path, arguments: list[str]) -> str | None:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 from dataclasses import asdict, dataclass, field
 from hashlib import sha256
 from pathlib import Path
@@ -38,6 +39,13 @@ class StyleMetrics:
     structured_models: int = 0
     bare_dict_annotations: int = 0
     logging_calls: int = 0
+    branch_points: int = 0
+    cyclomatic_complexity: int = 0
+    high_complexity_functions: int = 0
+    top_level_functions: int = 0
+    private_helpers: int = 0
+    snake_case_functions: int = 0
+    function_name_words: int = 0
 
     def features(self) -> dict[str, float]:
         funcs = max(self.functions, 1)
@@ -69,7 +77,63 @@ class StyleMetrics:
             "structured_model_ratio": self.structured_models / max(models, 1),
             "bare_dict_models_per_function": self.bare_dict_annotations / funcs,
             "print_share_of_output_calls": self.print_calls / max(output_calls, 1),
+            "branch_points_per_function": self.branch_points / funcs,
+            "mean_cyclomatic_complexity": self.cyclomatic_complexity / funcs,
+            "high_complexity_function_ratio": self.high_complexity_functions / funcs,
+            "private_helper_ratio": self.private_helpers
+            / max(self.top_level_functions, 1),
+            "snake_case_function_ratio": self.snake_case_functions / funcs,
+            "function_name_words_mean": self.function_name_words / funcs,
         }
+
+    def feature_supports(self) -> dict[str, int]:
+        """Return the observation count behind each derived style feature."""
+        generics = self.builtin_generic_annotations + self.legacy_generic_annotations
+        unions = self.pep604_unions + self.legacy_optional_unions
+        paths = self.pathlib_uses + self.os_path_uses
+        iterations = self.comprehensions + self.for_loops
+        models = self.structured_models + self.bare_dict_annotations
+        output_calls = self.logging_calls + self.print_calls
+        return {
+            "docstring_lines_per_function": self.functions,
+            "narration_comments_per_100_loc": self.loc,
+            "broad_exceptions_per_function": self.functions,
+            "print_calls_per_function": self.functions,
+            "nested_dicts_per_function": self.functions,
+            "temporary_names_per_100_loc": self.loc,
+            "annotation_density": self.functions,
+            "median_function_loc": self.functions,
+            "builtin_generic_ratio": generics,
+            "legacy_typing_per_100_loc": self.loc,
+            "pep604_union_ratio": unions,
+            "legacy_union_per_100_loc": self.loc,
+            "pathlib_ratio": paths,
+            "os_path_calls_per_100_loc": self.loc,
+            "comprehension_ratio": iterations,
+            "manual_loops_per_function": self.functions,
+            "structured_model_ratio": models,
+            "bare_dict_models_per_function": self.functions,
+            "print_share_of_output_calls": output_calls,
+            "branch_points_per_function": self.functions,
+            "mean_cyclomatic_complexity": self.functions,
+            "high_complexity_function_ratio": self.functions,
+            "private_helper_ratio": self.top_level_functions,
+            "snake_case_function_ratio": self.functions,
+            "function_name_words_mean": self.functions,
+        }
+
+
+@dataclass(frozen=True)
+class SymbolRecord:
+    name: str
+    kind: str
+    lineno: int
+    end_lineno: int
+    private: bool
+    decorated: bool
+    normalized_body_hash: str
+    body_nodes: int
+    parameter_count: int
 
 
 @dataclass
@@ -82,6 +146,8 @@ class FileRecord:
     module_aliases: tuple[str, ...] = ()
     imports: list[ImportRef] = field(default_factory=list)
     symbols: set[str] = field(default_factory=set)
+    symbol_details: tuple[SymbolRecord, ...] = ()
+    exported_symbols: set[str] = field(default_factory=set)
     dynamic_refs: set[str] = field(default_factory=set)
     opaque_dynamic_discovery: bool = False
     vocabulary: set[str] = field(default_factory=set)
@@ -97,6 +163,7 @@ class FileRecord:
     runtime_string_refs: set[str] = field(default_factory=set)
     parse_error: str | None = None
     mtime: float = 0.0
+    tree: ast.Module | None = field(default=None, repr=False)
 
 
 @dataclass

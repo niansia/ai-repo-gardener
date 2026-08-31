@@ -36,6 +36,58 @@ def test_flat_directory_reports_import_affinity_clusters(tmp_path: Path) -> None
     )
     assert len(clusters) >= 2
     assert finding.recommendation == "proposal_only"
+    plans = next(
+        item["value"] for item in finding.evidence if item["type"] == "migration_plan"
+    )
+    assert len(plans) >= 2
+    assert all(plan["apply_supported"] is False for plan in plans)
+    assert all(plan["moves"] for plan in plans)
+    assert report.metrics["structure_entropy"]["score"] > 0
+
+
+def test_structure_uses_git_change_coupling_for_disconnected_domains(
+    tmp_path: Path,
+) -> None:
+    executable = git_executable()
+    if executable is None:
+        pytest.skip("git is unavailable")
+    files = {
+        "repo-gardener.toml": "[analysis]\nflat_directory_threshold = 4",
+        "auth_login.py": "def login():\n    return 1",
+        "auth_token.py": "def token():\n    return 1",
+        "search_query.py": "def query():\n    return 1",
+        "search_vector.py": "def vector():\n    return 1",
+    }
+    write_project(tmp_path, files)
+    _git(executable, tmp_path, "init")
+    _git(executable, tmp_path, "config", "user.email", "tests@example.com")
+    _git(executable, tmp_path, "config", "user.name", "Repo Gardener Tests")
+    _git(executable, tmp_path, "add", ".")
+    _git(executable, tmp_path, "commit", "-m", "initial")
+    for suffix in ("# auth one", "# auth two"):
+        for name in ("auth_login.py", "auth_token.py"):
+            path = tmp_path / name
+            path.write_text(path.read_text(encoding="utf-8") + suffix + "\n")
+        _git(executable, tmp_path, "add", ".")
+        _git(executable, tmp_path, "commit", "-m", suffix)
+    for suffix in ("# search one", "# search two"):
+        for name in ("search_query.py", "search_vector.py"):
+            path = tmp_path / name
+            path.write_text(path.read_text(encoding="utf-8") + suffix + "\n")
+        _git(executable, tmp_path, "add", ".")
+        _git(executable, tmp_path, "commit", "-m", suffix)
+
+    report = Analyzer(tmp_path).report("structure")
+    finding = next(item for item in report.findings if item.rule == "flat-directory")
+    clusters = next(
+        item["value"]
+        for item in finding.evidence
+        if item["type"] == "probable_clusters"
+    )
+
+    assert len(clusters) == 2
+    assert all(cluster["signals"]["change_coupling"] > 0 for cluster in clusters)
+    assert report.metrics["structure_entropy"]["history_coupling_available"] is True
 
 
 def test_large_cohesive_package_gets_factual_directory_load_finding(
@@ -219,6 +271,19 @@ class Entry:
 def collect(values: list[str] | None) -> list[Path]:
     return [Path(value) for value in (values or [])]
 """,
+            "complex_names.py": """
+def _prepare_comprehensive_result(value):
+    if value:
+        if value > 1:
+            return value
+    return 0
+
+def _build_detailed_response(value):
+    return value
+
+def PublicCamelCase(value):
+    return value
+""",
         },
     )
 
@@ -227,6 +292,7 @@ def collect(values: list[str] | None) -> list[Path]:
     records = {record.path.name: record for record in analyzer.records}
     legacy = records["legacy.py"].style
     modern = records["modern.py"].style
+    complex_names = records["complex_names.py"].style
 
     assert legacy.legacy_generic_annotations >= 2
     assert legacy.legacy_optional_unions >= 1
@@ -237,6 +303,79 @@ def collect(values: list[str] | None) -> list[Path]:
     assert modern.pathlib_uses == 1
     assert modern.comprehensions == 1
     assert modern.structured_models == 1
+    assert complex_names.branch_points >= 2
+    assert complex_names.private_helpers == 2
+    assert complex_names.top_level_functions == 3
+    assert complex_names.snake_case_functions == 2
+    assert complex_names.function_name_words >= 9
+
+
+def test_low_support_ratio_features_are_not_treated_as_style_drift(
+    tmp_path: Path,
+) -> None:
+    files = {
+        **{
+            f"human_{index}.py": (
+                "def first(value):\n    return value\n\n"
+                "def second(value):\n    return value\n\n"
+                "def third(value):\n    return value\n"
+            )
+            for index in range(6)
+        },
+        "single_path.py": (
+            "from pathlib import Path\n\n"
+            "def first(value):\n    return Path(value)\n\n"
+            "def second(value):\n    return value\n\n"
+            "def third(value):\n    return value\n"
+        ),
+    }
+    write_project(tmp_path, files)
+
+    report = Analyzer(tmp_path).report("style")
+    finding = next(
+        (item for item in report.findings if item.path == "single_path.py"), None
+    )
+
+    assert finding is None or not any(
+        item["type"] == "pathlib_ratio" for item in finding.evidence
+    )
+
+
+def test_complexity_naming_and_private_helper_drift_are_reported(
+    tmp_path: Path,
+) -> None:
+    baseline_source = (
+        "def first(value):\n    return value\n\n"
+        "def second(value):\n    return value\n\n"
+        "def third(value):\n    return value\n"
+    )
+    branch_body = "\n".join(
+        f"    if value == {index}:\n        value += {index + 1}" for index in range(8)
+    )
+    candidate = "\n\n".join(
+        f"def _PerformExtremelyDetailedOperation{index}(value):\n"
+        f"{branch_body}\n    return value"
+        for index in range(3)
+    )
+    write_project(
+        tmp_path,
+        {
+            **{f"human_{index}.py": baseline_source for index in range(8)},
+            "drift.py": candidate,
+        },
+    )
+
+    finding = next(
+        item
+        for item in Analyzer(tmp_path).report("style").findings
+        if item.path == "drift.py"
+    )
+    evidence_types = {item["type"] for item in finding.evidence}
+
+    assert "mean_cyclomatic_complexity" in evidence_types
+    assert "private_helper_ratio" in evidence_types
+    assert "snake_case_function_ratio" in evidence_types
+    assert "function_name_words_mean" in evidence_types
 
 
 def test_pre_ai_git_baseline_detects_drift_in_an_all_ai_current_repo(

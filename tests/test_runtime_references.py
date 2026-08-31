@@ -13,7 +13,6 @@ def test_assignment_alias_extraction_is_cached(
     tree = ast.parse(
         "import importlib\nil = importlib\nil2 = il\nloader = il2.import_module\n"
     )
-    scanner = RuntimeReferenceScanner(tree)
     original_walk = ast.walk
     walk_count = 0
 
@@ -23,6 +22,7 @@ def test_assignment_alias_extraction_is_cached(
         return original_walk(node)
 
     monkeypatch.setattr(runtime_references.ast, "walk", counted_walk)
+    scanner = RuntimeReferenceScanner(tree)
 
     first = scanner._propagate_assignment_aliases({"importlib"})
     for _ in range(11):

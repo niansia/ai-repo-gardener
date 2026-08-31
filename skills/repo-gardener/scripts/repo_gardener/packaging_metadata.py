@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from .ast_utils import dotted_name
 from .config import Config
 
 MODULE_NAME = re.compile(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*")
@@ -186,7 +187,7 @@ def _read_setup_py(
     for node in ast.walk(tree):
         if (
             not isinstance(node, ast.Call)
-            or _call_name(node.func) not in setup_callables
+            or dotted_name(node.func) not in setup_callables
         ):
             continue
         has_entry_points = False
@@ -291,7 +292,7 @@ def _setup_callables(tree: ast.Module) -> set[str]:
         elif isinstance(node, ast.Assign) and isinstance(
             node.value, (ast.Name, ast.Attribute)
         ):
-            source = _call_name(node.value)
+            source = dotted_name(node.value)
             assignments.extend(
                 (target.id, source)
                 for target in node.targets
@@ -305,15 +306,6 @@ def _setup_callables(tree: ast.Module) -> set[str]:
                 callables.add(target)
                 changed = True
     return callables
-
-
-def _call_name(node: ast.AST) -> str:
-    if isinstance(node, ast.Name):
-        return node.id
-    if isinstance(node, ast.Attribute):
-        prefix = _call_name(node.value)
-        return f"{prefix}.{node.attr}" if prefix else node.attr
-    return ""
 
 
 def _normalize_root(value: str) -> str:

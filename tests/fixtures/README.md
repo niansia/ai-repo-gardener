@@ -13,3 +13,4 @@ repository and create deterministic commits there.
 - `src_prefix_import`: literal `src.*` imports resolve alongside installed names.
 - `style_human_baseline`: a human baseline and one deliberately drifting file.
 - `flat_four_domains`: four disconnected responsibility groups for experimental analysis.
+- `extended_gc_rules`: review-only orphan-helper, duplicate implementation, and dependency-leftover evidence.

@@ -8,6 +8,7 @@ Read this before applying any cleanup.
 - Files with dynamic import, string module-path, registry, reflection, or public API evidence.
 - Files without a plausible replacement.
 - Orphan files, even when they were created in the current iteration.
+- Orphan helpers, duplicate implementations, and dependency leftovers.
 - Partial replacements that omit symbols from the older file.
 - Medium- or low-confidence findings.
 - Architecture or style findings.

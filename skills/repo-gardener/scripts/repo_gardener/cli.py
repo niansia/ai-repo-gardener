@@ -25,7 +25,10 @@ def _positive_seconds(value: str) -> float:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="repo-gardener",
-        description="Find AI iteration leftovers with deterministic evidence.",
+        description=(
+            "Find AI iteration leftovers, architecture pressure, and house-style "
+            "drift with deterministic evidence."
+        ),
     )
     parser.add_argument(
         "--version", action="version", version=f"repo-gardener {__version__}"
@@ -33,9 +36,9 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
     for command, help_text in [
         ("scan", "Run the supported repo-GC analysis"),
-        ("stale", "Find evidence-backed superseded Python files"),
-        ("structure", "Experimentally inspect flat directories and clusters"),
-        ("style", "Experimentally inspect Python house-style drift"),
+        ("stale", "Find file, symbol, duplicate, and dependency leftovers"),
+        ("structure", "Inspect structure entropy and review-only move plans"),
+        ("style", "Inspect baseline-relative Python house-style drift"),
         ("diff", "Audit repo-GC findings associated with a Git iteration"),
     ]:
         subparser = subparsers.add_parser(command, help=help_text)
@@ -50,7 +53,7 @@ def build_parser() -> argparse.ArgumentParser:
             subparser.add_argument(
                 "--experimental",
                 action="store_true",
-                help="Also run experimental structure and style analysis",
+                help="Also run opt-in, review-only structure and style analysis",
             )
         if command in {"scan", "style", "diff"}:
             subparser.add_argument(
