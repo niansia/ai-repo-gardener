@@ -21,6 +21,7 @@ class RuntimeReferenceScanner:
 
     def __init__(self, tree: ast.Module):
         self.tree = tree
+        self._assignment_cache: list[tuple[list[str], str]] | None = None
 
     def scan(self) -> RuntimeReferences:
         (
@@ -316,17 +317,7 @@ class RuntimeReferenceScanner:
         return False
 
     def _propagate_assignment_aliases(self, known: set[str]) -> set[str]:
-        assignments: list[tuple[list[str], str]] = []
-        for node in ast.walk(self.tree):
-            if isinstance(node, ast.Assign):
-                targets = [
-                    target.id for target in node.targets if isinstance(target, ast.Name)
-                ]
-                assignments.append((targets, _call_name(node.value)))
-            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-                assignments.append(
-                    ([node.target.id], _call_name(node.value) if node.value else "")
-                )
+        assignments = self._assignment_pairs()
         expanded = set(known)
         changed = True
         while changed:
@@ -339,6 +330,23 @@ class RuntimeReferenceScanner:
                         expanded.add(target)
                         changed = True
         return expanded
+
+    def _assignment_pairs(self) -> list[tuple[list[str], str]]:
+        if self._assignment_cache is not None:
+            return self._assignment_cache
+        assignments: list[tuple[list[str], str]] = []
+        for node in ast.walk(self.tree):
+            if isinstance(node, ast.Assign):
+                targets = [
+                    target.id for target in node.targets if isinstance(target, ast.Name)
+                ]
+                assignments.append((targets, _call_name(node.value)))
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                assignments.append(
+                    ([node.target.id], _call_name(node.value) if node.value else "")
+                )
+        self._assignment_cache = assignments
+        return assignments
 
     def _module_shaped_strings(self) -> set[str]:
         modules: set[str] = set()

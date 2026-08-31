@@ -17,9 +17,9 @@ from repo_gardener.git_support import git_executable
 from repo_gardener.models import Finding
 
 
-def test_validation_failure_restores_deleted_file(tmp_path: Path) -> None:
+def test_validation_failure_leaves_original_tree_unchanged(tmp_path: Path) -> None:
     source = "def parse(value):\n    return value.strip()\n"
-    write_project(tmp_path, {"parser_old.py": source})
+    write_project(tmp_path, {"parser_old.py": source, "side.txt": "original"})
     finding = Finding(
         rule="stale-file",
         category="repo-gc",
@@ -30,12 +30,17 @@ def test_validation_failure_restores_deleted_file(tmp_path: Path) -> None:
         replacement="parser.py",
         recommendation="safe_delete_candidate",
     ).finalize()
-    command = f'"{sys.executable}" -c "import sys; sys.exit(1)"'
+    command = (
+        f'"{sys.executable}" -c "from pathlib import Path; '
+        "Path('side.txt').write_text('mutated'); raise SystemExit(1)\""
+    )
 
-    with pytest.raises(FixError, match="restored"):
+    with pytest.raises(FixError, match="isolated copy.*unchanged"):
         apply_deletions(tmp_path, [finding], [command])
 
     assert (tmp_path / "parser_old.py").read_text(encoding="utf-8") == source
+    assert (tmp_path / "side.txt").read_text(encoding="utf-8") == "original\n"
+    assert not (tmp_path / ".repo-gardener").exists()
 
 
 def test_successful_apply_can_be_restored(tmp_path: Path) -> None:
@@ -55,6 +60,7 @@ def test_successful_apply_can_be_restored(tmp_path: Path) -> None:
 
     manifest = apply_deletions(tmp_path, [finding], [command])
     assert manifest["status"] == "applied"
+    assert manifest["validation_mode"] == "isolated_copy"
     assert not (tmp_path / "parser_old.py").exists()
 
     from repo_gardener.fixes import restore_last
@@ -113,7 +119,7 @@ def test_validation_timeout_restores_deleted_file(
 
     monkeypatch.setattr(fixes_module.subprocess, "run", time_out)
 
-    with pytest.raises(FixError, match="restored.*timed out"):
+    with pytest.raises(FixError, match="unchanged.*timed out"):
         apply_deletions(
             tmp_path,
             [finding],
@@ -122,6 +128,68 @@ def test_validation_timeout_restores_deleted_file(
         )
 
     assert (tmp_path / "parser_old.py").read_text(encoding="utf-8") == source
+
+
+def test_successful_isolated_validation_does_not_leak_side_effects(
+    tmp_path: Path,
+) -> None:
+    source = "def parse(value):\n    return value.strip()\n"
+    write_project(tmp_path, {"parser_old.py": source, "side.txt": "original"})
+    finding = Finding(
+        rule="stale-file",
+        category="repo-gc",
+        severity="warning",
+        confidence=0.95,
+        risk=0.0,
+        path="parser_old.py",
+        replacement="parser.py",
+        recommendation="safe_delete_candidate",
+    ).finalize()
+    command = (
+        f'"{sys.executable}" -c "from pathlib import Path; '
+        "assert not Path('parser_old.py').exists(); "
+        "Path('side.txt').write_text('validation side effect')\""
+    )
+
+    apply_deletions(tmp_path, [finding], [command])
+
+    assert not (tmp_path / "parser_old.py").exists()
+    assert (tmp_path / "side.txt").read_text(encoding="utf-8") == "original\n"
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_apply_rejects_rollback_state_symlink_escape(
+    tmp_path: Path, nested: bool
+) -> None:
+    source = "def parse(value):\n    return value.strip()\n"
+    write_project(tmp_path, {"parser_old.py": source})
+    outside = tmp_path.parent / f"{tmp_path.name}-outside-{int(nested)}"
+    outside.mkdir()
+    state_root = tmp_path / ".repo-gardener"
+    try:
+        if nested:
+            state_root.mkdir()
+            (state_root / "rollback").symlink_to(outside, target_is_directory=True)
+        else:
+            state_root.symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlink creation is unavailable")
+    finding = Finding(
+        rule="stale-file",
+        category="repo-gc",
+        severity="warning",
+        confidence=0.95,
+        risk=0.0,
+        path="parser_old.py",
+        replacement="parser.py",
+        recommendation="safe_delete_candidate",
+    ).finalize()
+
+    with pytest.raises(FixError, match="symlink|escapes repository root"):
+        apply_deletions(tmp_path, [finding], ["ignored"])
+
+    assert (tmp_path / "parser_old.py").is_file()
+    assert list(outside.iterdir()) == []
 
 
 def test_apply_rejects_a_stale_content_hash(tmp_path: Path) -> None:
@@ -204,12 +272,13 @@ def test_apply_rechecks_call_site_evidence_immediately_before_delete(
             call_site.write_text("import parser_old\n", encoding="utf-8")
 
     monkeypatch.setattr(fixes_module.shutil, "copy2", mutate_after_snapshot)
+    validation = f'"{sys.executable}" -c "pass"'
 
     with pytest.raises(FixError, match="evidence file changed since review"):
         apply_deletions(
             tmp_path,
             [finding],
-            ["ignored"],
+            [validation],
             reviewed_plan,
         )
 

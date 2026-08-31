@@ -33,7 +33,7 @@ FRAMES = [
     [
         ("$ repo-gardener diff .", BLUE),
         ("", TEXT),
-        ("Repo Gardener", TEXT),
+        ("AI Repo Gardener", TEXT),
         (
             "========================================================================",
             MUTED,
@@ -50,7 +50,7 @@ FRAMES = [
     [
         ("$ repo-gardener fix . --dry-run", BLUE),
         ("", TEXT),
-        ("Repo Gardener safe deletion plan", TEXT),
+        ("AI Repo Gardener safe deletion plan", TEXT),
         (
             "========================================================================",
             MUTED,

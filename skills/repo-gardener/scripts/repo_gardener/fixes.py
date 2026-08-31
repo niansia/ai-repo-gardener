@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
+import tempfile
 from datetime import UTC, datetime
 from hashlib import sha256
 from math import isfinite
 from pathlib import Path
+from uuid import uuid4
 
 from .models import Finding
 
@@ -39,12 +42,14 @@ def apply_deletions(
     reviewed_plan: dict[str, object] | None = None,
     validation_timeout: float = 300.0,
 ) -> dict[str, object]:
+    root = root.resolve()
     if not validation_commands:
         raise FixError(
             "--apply requires at least one --validate command or configured validation command"
         )
     if not isfinite(validation_timeout) or validation_timeout <= 0:
         raise FixError("validation timeout must be greater than zero")
+    _state_root(root)
     files = [_safe_target(root, finding.path) for finding in findings]
     if any(path.is_symlink() for path in files):
         raise FixError("refusing to delete symlink candidates")
@@ -54,15 +59,29 @@ def apply_deletions(
             "candidate files disappeared before apply: " + ", ".join(missing)
         )
     _verify_plan(root, findings, reviewed_plan)
+    try:
+        results = _validate_in_isolated_copy(
+            root,
+            findings,
+            validation_commands,
+            validation_timeout,
+        )
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except (FixError, OSError) as exc:
+        raise FixError(
+            "validation failed in an isolated copy; original repository unchanged: "
+            f"{exc}"
+        ) from exc
+    _verify_plan(root, findings, reviewed_plan)
 
     operation_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    state_root = root / STATE_DIRECTORY
-    snapshot = state_root / "rollback" / operation_id
+    state_root, snapshot = _create_snapshot(root, operation_id)
     suffix = 1
     while snapshot.exists():
-        snapshot = state_root / "rollback" / f"{operation_id}-{suffix}"
+        snapshot = _safe_state_path(root, Path("rollback") / f"{operation_id}-{suffix}")
         suffix += 1
-    snapshot.mkdir(parents=True)
+    snapshot.mkdir()
     manifest: dict[str, object] = {
         "schema_version": 1,
         "operation_id": snapshot.name,
@@ -70,108 +89,169 @@ def apply_deletions(
         "status": "pending",
         "files": [],
         "validation": validation_commands,
+        "validation_mode": "isolated_copy",
         "validation_timeout_seconds": validation_timeout,
+        "validation_results": results,
     }
     entries: list[dict[str, str]] = []
     for path in files:
         relative = path.relative_to(root)
-        destination = snapshot / "files" / relative
+        destination = _safe_state_path(
+            root, Path("rollback") / snapshot.name / "files" / relative
+        )
         destination.parent.mkdir(parents=True, exist_ok=True)
+        destination = _safe_state_path(
+            root, Path("rollback") / snapshot.name / "files" / relative
+        )
         shutil.copy2(path, destination)
         entries.append({"path": relative.as_posix(), "sha256": _hash(path)})
     manifest["files"] = entries
-    _write_json(snapshot / "manifest.json", manifest)
-    _write_json(state_root / "last-operation.json", {"operation_id": snapshot.name})
+    _write_state_json(root, snapshot / "manifest.json", manifest)
+    _write_state_json(
+        root, state_root / "last-operation.json", {"operation_id": snapshot.name}
+    )
 
-    results: list[dict[str, object]] = []
     try:
         _verify_plan(root, findings, reviewed_plan)
         for path in files:
             path.unlink()
-        for command in validation_commands:
-            try:
-                completed = subprocess.run(
-                    command,
-                    cwd=root,
-                    shell=True,
-                    text=True,
-                    capture_output=True,
-                    check=False,
-                    timeout=validation_timeout,
-                )
-            except subprocess.TimeoutExpired as exc:
-                results.append(
-                    {
-                        "command": command,
-                        "timed_out": True,
-                        "timeout_seconds": validation_timeout,
-                        "stdout": str(exc.stdout or "")[-4000:],
-                        "stderr": str(exc.stderr or "")[-4000:],
-                    }
-                )
-                raise FixError(
-                    f"validation timed out after {validation_timeout:g} seconds: "
-                    f"{command}"
-                ) from exc
-            results.append(
-                {
-                    "command": command,
-                    "exit_code": completed.returncode,
-                    "stdout": completed.stdout[-4000:],
-                    "stderr": completed.stderr[-4000:],
-                }
-            )
-            if completed.returncode != 0:
-                raise FixError(f"validation failed: {command}")
     except BaseException as exc:
         _restore_snapshot(root, snapshot)
-        manifest["status"] = "restored_after_validation_failure_or_interruption"
-        manifest["validation_results"] = results
+        manifest["status"] = "restored_after_apply_failure_or_interruption"
         manifest["failure"] = f"{type(exc).__name__}: {exc}"
-        _write_json(snapshot / "manifest.json", manifest)
+        _write_state_json(root, snapshot / "manifest.json", manifest)
         if isinstance(exc, (KeyboardInterrupt, SystemExit)):
             raise
         raise FixError(
-            f"validation failed or was interrupted and deleted files were restored: {exc}"
+            f"apply failed or was interrupted and deleted files were restored: {exc}"
         ) from exc
     manifest["status"] = "applied"
-    manifest["validation_results"] = results
-    _write_json(snapshot / "manifest.json", manifest)
+    _write_state_json(root, snapshot / "manifest.json", manifest)
     return manifest
 
 
+def _validate_in_isolated_copy(
+    root: Path,
+    findings: list[Finding],
+    commands: list[str],
+    timeout: float,
+) -> list[dict[str, object]]:
+    with tempfile.TemporaryDirectory(prefix="repo-gardener-validation-") as raw:
+        workspace = Path(raw) / "repository"
+
+        def ignore_state(directory: str, names: list[str]) -> set[str]:
+            ignored: set[str] = set()
+            if Path(directory).resolve() != root:
+                return ignored
+            if STATE_DIRECTORY in names:
+                ignored.add(STATE_DIRECTORY)
+            git_metadata = root / ".git"
+            if ".git" in names and not git_metadata.is_dir():
+                ignored.add(".git")
+            return ignored
+
+        shutil.copytree(root, workspace, symlinks=True, ignore=ignore_state)
+        for finding in findings:
+            candidate = _safe_target(workspace, finding.path)
+            if not candidate.is_file():
+                raise FixError(f"candidate missing from isolated copy: {finding.path}")
+            candidate.unlink()
+        return _run_validation_commands(workspace, commands, timeout)
+
+
+def _run_validation_commands(
+    workspace: Path, commands: list[str], timeout: float
+) -> list[dict[str, object]]:
+    results: list[dict[str, object]] = []
+    for command in commands:
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=workspace,
+                shell=True,
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as exc:
+            results.append(
+                {
+                    "command": command,
+                    "timed_out": True,
+                    "timeout_seconds": timeout,
+                    "stdout": str(exc.stdout or "")[-4000:],
+                    "stderr": str(exc.stderr or "")[-4000:],
+                }
+            )
+            raise FixError(
+                f"validation timed out after {timeout:g} seconds: {command}"
+            ) from exc
+        results.append(
+            {
+                "command": command,
+                "exit_code": completed.returncode,
+                "stdout": completed.stdout[-4000:],
+                "stderr": completed.stderr[-4000:],
+            }
+        )
+        if completed.returncode != 0:
+            raise FixError(f"validation failed: {command}")
+    return results
+
+
 def restore_last(root: Path) -> dict[str, object]:
-    pointer = root / STATE_DIRECTORY / "last-operation.json"
+    root = root.resolve()
+    pointer = _safe_state_path(root, "last-operation.json")
     if not pointer.is_file():
-        raise FixError("no Repo Gardener operation is available to restore")
+        raise FixError("no AI Repo Gardener operation is available to restore")
     operation = json.loads(pointer.read_text(encoding="utf-8"))["operation_id"]
-    snapshot = root / STATE_DIRECTORY / "rollback" / operation
+    if (
+        not isinstance(operation, str)
+        or not operation
+        or Path(operation).name != operation
+        or operation in {".", ".."}
+    ):
+        raise FixError("rollback operation id is invalid")
+    snapshot = _safe_state_path(root, Path("rollback") / operation)
     manifest = _restore_snapshot(root, snapshot)
     manifest["status"] = "restored_by_user"
-    _write_json(snapshot / "manifest.json", manifest)
+    _write_state_json(root, snapshot / "manifest.json", manifest)
     return manifest
 
 
 def _restore_snapshot(root: Path, snapshot: Path) -> dict[str, object]:
-    manifest_path = snapshot / "manifest.json"
+    expected_snapshot = _safe_state_path(root, Path("rollback") / snapshot.name)
+    if expected_snapshot != snapshot:
+        raise FixError("rollback snapshot path is invalid")
+    manifest_path = _safe_state_path(
+        root, Path("rollback") / snapshot.name / "manifest.json"
+    )
     if not manifest_path.is_file():
         raise FixError(f"rollback manifest not found: {manifest_path}")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     for entry in manifest.get("files", []):
-        destination = _safe_target(root, entry["path"])
-        source = snapshot / "files" / entry["path"]
+        if not isinstance(entry, dict):
+            raise FixError("rollback manifest contains an invalid file entry")
+        relative = entry.get("path")
+        expected_hash = entry.get("sha256")
+        if not isinstance(relative, str) or not isinstance(expected_hash, str):
+            raise FixError("rollback manifest contains incomplete file data")
+        destination = _safe_target(root, relative)
+        source = _safe_state_path(
+            root, Path("rollback") / snapshot.name / "files" / relative
+        )
         if not source.is_file():
-            raise FixError(f"rollback content missing for {entry['path']}")
-        if destination.is_symlink():
-            raise FixError(f"refusing to restore through a symlink: {entry['path']}")
-        if destination.exists() and _hash(destination) != entry["sha256"]:
+            raise FixError(f"rollback content missing for {relative}")
+        if destination.exists() and _hash(destination) != expected_hash:
             raise FixError(
-                f"refusing to overwrite a changed file during restore: {entry['path']}"
+                f"refusing to overwrite a changed file during restore: {relative}"
             )
         destination.parent.mkdir(parents=True, exist_ok=True)
+        destination = _safe_target(root, relative)
         shutil.copy2(source, destination)
-        if _hash(destination) != entry["sha256"]:
-            raise FixError(f"restored content hash mismatch for {entry['path']}")
+        if _hash(destination) != expected_hash:
+            raise FixError(f"restored content hash mismatch for {relative}")
     return manifest
 
 
@@ -179,6 +259,8 @@ def _safe_target(root: Path, relative_path: str) -> Path:
     relative = Path(relative_path)
     if relative.is_absolute():
         raise FixError(f"absolute path is not allowed: {relative_path}")
+    if ".." in relative.parts:
+        raise FixError(f"path escapes repository root: {relative_path}")
     root_resolved = root.resolve()
     target = root_resolved / relative
     resolved = target.resolve()
@@ -186,7 +268,50 @@ def _safe_target(root: Path, relative_path: str) -> Path:
         resolved.relative_to(root_resolved)
     except ValueError as exc:
         raise FixError(f"path escapes repository root: {relative_path}") from exc
+    current = root_resolved
+    for part in relative.parts:
+        current /= part
+        if current.is_symlink():
+            raise FixError(f"refusing path through a symlink: {relative_path}")
     return target
+
+
+def _state_root(root: Path) -> Path:
+    root_resolved = root.resolve()
+    state_root = root_resolved / STATE_DIRECTORY
+    if state_root.is_symlink():
+        raise FixError("refusing symlink rollback state directory: .repo-gardener")
+    try:
+        state_root.resolve().relative_to(root_resolved)
+    except ValueError as exc:
+        raise FixError("rollback state directory escapes repository root") from exc
+    if state_root.exists() and not state_root.is_dir():
+        raise FixError("rollback state path is not a directory: .repo-gardener")
+    return state_root
+
+
+def _safe_state_path(root: Path, relative_path: str | Path) -> Path:
+    state_root = _state_root(root)
+    target = _safe_target(state_root, str(relative_path))
+    try:
+        target.resolve().relative_to(root.resolve())
+    except ValueError as exc:
+        raise FixError(
+            f"rollback state path escapes repository root: {relative_path}"
+        ) from exc
+    return target
+
+
+def _create_snapshot(root: Path, operation_id: str) -> tuple[Path, Path]:
+    state_root = _state_root(root)
+    state_root.mkdir(exist_ok=True)
+    state_root = _state_root(root)
+    rollback_root = _safe_state_path(root, "rollback")
+    if rollback_root.exists() and not rollback_root.is_dir():
+        raise FixError("rollback state path is not a directory: rollback")
+    rollback_root.mkdir(exist_ok=True)
+    snapshot = _safe_state_path(root, Path("rollback") / operation_id)
+    return state_root, snapshot
 
 
 def _verify_plan(
@@ -265,11 +390,24 @@ def _hash(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _write_json(path: Path, value: object) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(
-        json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
-    temporary.replace(path)
+def _write_state_json(root: Path, path: Path, value: object) -> None:
+    state_root = _state_root(root)
+    try:
+        relative = path.relative_to(state_root)
+    except ValueError as exc:
+        raise FixError(f"state file is outside .repo-gardener: {path}") from exc
+    safe_path = _safe_state_path(root, relative)
+    safe_path.parent.mkdir(parents=True, exist_ok=True)
+    safe_path = _safe_state_path(root, relative)
+    temporary = safe_path.parent / f".{safe_path.name}.{uuid4().hex}.tmp"
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(
+                json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+            )
+        if safe_path.is_symlink():
+            raise FixError(f"refusing to replace symlink state file: {relative}")
+        os.replace(temporary, safe_path)
+    finally:
+        temporary.unlink(missing_ok=True)

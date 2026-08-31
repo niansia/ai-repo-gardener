@@ -1,8 +1,8 @@
 # Adversarial safety benchmark
 
-Run on 2026-08-31 with Python 3.12. The suite passes 96 tests on Windows, where
-one real-symlink test is skipped when the account cannot create symlinks, and
-all 97 tests on Linux. This table isolates twenty-four cases where a normal
+Run on 2026-08-31 with Python 3.12. The suite passes 98 tests on Windows, where
+three real-symlink tests are skipped when the account cannot create symlinks,
+and all 101 tests on Linux. This table isolates twenty-four cases where a normal
 import graph can make live or user-modified code look unused.
 
 | Scenario | Required outcome | Result |
@@ -39,9 +39,11 @@ plan and rejects a repository whose current operation set has grown since the
 plan was reviewed. Candidate, replacement, and call-site evidence hashes are
 rechecked at the final mutation boundary.
 
-Validation timeout tests also verify that a hung command restores deleted files,
-and malformed configuration types are rejected before analysis rather than
-coerced into safety overrides.
+Validation failure, timeout, and side-effect tests verify that commands run in
+an isolated copy and leave the original tree unchanged. State-root and nested
+rollback symlink tests verify that `.repo-gardener` cannot escape the repository.
+Malformed configuration types are rejected before analysis rather than coerced
+into safety overrides.
 
 This is a release-gate fixture count, not an estimate of precision on all
 Python repositories. Reproduce it with:

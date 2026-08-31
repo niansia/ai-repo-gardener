@@ -6,6 +6,12 @@ A reviewer-reported Linux run measured the same 1,519-file pandas scan at
 18.1 seconds, illustrating that these local timings should not be compared as
 cross-platform performance guarantees.
 
+A later alias-safety regression caused a reviewer-measured pandas scan to rise
+to 44.7 seconds because assignment aliases were extracted by twelve full AST
+walks per file. Caching the tree-dependent assignment pairs restored that same
+reviewer's copy to 21.0 seconds with unchanged findings. These are reviewer
+measurements, not a replacement for the pinned local table below.
+
 Command: `repo-gardener scan <repo> --confidence all`
 
 | Repository | Commit | Python files | Time | Stale findings |

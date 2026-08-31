@@ -1,12 +1,14 @@
-# Repo Gardener
+# AI Repo Gardener
 
 **Find files the AI forgot to delete.**
 
-Repo Gardener is a deterministic garbage collector for AI-edited Python
-repositories. Version `0.1.0a3` focuses on one job: finding superseded iteration files
-and newly-created orphan files without turning weak guesses into deletions.
+AI Repo Gardener is a deterministic garbage collector for AI-edited Python
+repositories. The package, CLI, and portable Skill keep the concise
+`repo-gardener` identifier. Version `0.1.0a4` focuses on one job: finding
+superseded iteration files and newly-created orphan files without turning weak
+guesses into deletions.
 
-![Repo Gardener diff and safe dry-run demo](docs/demo.gif)
+![AI Repo Gardener diff and safe dry-run demo](docs/demo.gif)
 
 ```text
 $ repo-gardener diff .
@@ -32,9 +34,9 @@ committed range.
 - `orphan-file`: a file changed in the current iteration is unreachable, has
   zero inbound imports, and has no plausible replacement. This is always
   review-only.
-- Safe deletion: snapshot, SHA-256 verification, symlink and path-escape
-  refusal, stale-plan rejection, required validation, deleted-file restore on
-  failure or interruption, and manual restore. Apply remains experimental.
+- Safe deletion: isolated-copy validation before mutation, snapshot, SHA-256
+  verification, symlink and path-escape refusal, stale-plan rejection, and
+  manual restore. Apply remains experimental.
 - Both conventional `src/package` imports and literal `src.package` imports.
 - Worktree, staged, committed-range, and untracked changes in `diff` mode.
 - Built-in entrypoint recognition for FastAPI, Flask, Django, Click, and Typer.
@@ -91,7 +93,7 @@ follows the open [Agent Skills specification](https://agentskills.io/specificati
 | `diff [--base <ref>]` | Audit committed, worktree, staged, and untracked iteration changes; base defaults to `HEAD` | Never |
 | `fix [--base <ref>] --dry-run` | Preview matching high-confidence deletions; base defaults to `HEAD` | Never |
 | `fix [--base <ref>] --dry-run --format json` | Emit the reviewed plan contract | Never |
-| `fix --apply --plan <json> --validate <cmd> [--validation-timeout <seconds>]` | Experimental: apply exactly the reviewed plan, validate, and restore deleted files on failure, timeout, or interruption | Yes |
+| `fix --apply --plan <json> --validate <cmd> [--validation-timeout <seconds>]` | Experimental: validate the reviewed deletion in an isolated copy, reverify the original, then apply it | Yes |
 | `fix --restore` | Restore the latest operation | Yes |
 | `structure` | Run experimental directory analysis explicitly | Never |
 | `style --baseline <ref-or-date>` | Run experimental repo-relative Python style analysis | Never |
@@ -176,9 +178,13 @@ a public or plugin-facing API.
 Validation commands read from the target repository are untrusted and ignored
 by default. Prefer explicit `--validate` arguments. `--trust-repo-config` is an
 opt-in to execute commands supplied by that repository and should only be used
-after review. Each validation command has a 300-second default timeout; set a
-different positive limit with `--validation-timeout`. Timeout is treated as a
-validation failure and restores the deleted candidates.
+after review. Validation runs against an isolated copy where the planned
+candidate files have already been removed. Only after validation succeeds does
+AI Repo Gardener reverifies the original hashes and performs the real deletion.
+Relative-path validation side effects stay in the disposable copy. This is not
+a command sandbox: commands that address absolute paths or external services
+can still affect them. Each command has a 300-second default timeout; set a
+different positive limit with `--validation-timeout`.
 
 Applied fixes store recoverable snapshots under `.repo-gardener/`. Add this
 line to the target repository's `.gitignore`:
@@ -187,9 +193,11 @@ line to the target repository's `.gitignore`:
 .repo-gardener/
 ```
 
-Rollback restores the deleted candidate files. It does not revert unrelated
-files that a validation command may modify, and it cannot recover from process
-termination that prevents cleanup code from running.
+Rollback snapshots and state files are confined to `.repo-gardener/`; symlinks
+at the state root or any rollback path are refused. Manual rollback restores the
+deleted candidate files. Validation does not run in the original working tree,
+so its ordinary relative-path cache, coverage, generated-file, or test-fixture
+side effects are discarded with the isolated copy.
 
 The JSON contract is documented in
 [`skills/repo-gardener/references/finding-schema.md`](skills/repo-gardener/references/finding-schema.md).

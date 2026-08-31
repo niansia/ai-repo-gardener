@@ -28,7 +28,7 @@ def render_json(report: Report, confidence: str) -> str:
 def render_pretty(report: Report, confidence: str) -> str:
     data = filtered_report(report, confidence)
     lines = [
-        "Repo Gardener",
+        "AI Repo Gardener",
         "=" * 72,
         f"Command: {report.command}  Python files: {data['metrics']['python_files']}  Findings shown: {data['summary']['shown']}",
     ]
@@ -74,7 +74,7 @@ def render_fix_plan(
     plan_id: str,
     blockers: list[str],
 ) -> str:
-    lines = ["Repo Gardener safe deletion plan", "=" * 72, f"Root: {root}"]
+    lines = ["AI Repo Gardener safe deletion plan", "=" * 72, f"Root: {root}"]
     lines.append(f"Plan ID: {plan_id}")
     lines.append("Rollback data: .repo-gardener/ (keep this path in .gitignore)")
     if blockers:

@@ -1,4 +1,4 @@
-"""Run Repo Gardener directly from an installed Agent Skill folder."""
+"""Run AI Repo Gardener directly from an installed Agent Skill folder."""
 
 from repo_gardener.cli import main
 
