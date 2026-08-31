@@ -11,6 +11,7 @@ from math import isfinite
 from pathlib import Path
 from uuid import uuid4
 
+from .git_support import git_executable
 from .models import Finding
 
 STATE_DIRECTORY = ".repo-gardener"
@@ -59,6 +60,7 @@ def apply_deletions(
             "candidate files disappeared before apply: " + ", ".join(missing)
         )
     _verify_plan(root, findings, reviewed_plan)
+    _validate_repository_symlinks(root)
     try:
         results = _validate_in_isolated_copy(
             root,
@@ -138,25 +140,93 @@ def _validate_in_isolated_copy(
 ) -> list[dict[str, object]]:
     with tempfile.TemporaryDirectory(prefix="repo-gardener-validation-") as raw:
         workspace = Path(raw) / "repository"
+        worktree_created = _prepare_validation_workspace(root, workspace)
+        try:
+            for finding in findings:
+                candidate = _safe_target(workspace, finding.path)
+                if not candidate.is_file():
+                    raise FixError(
+                        f"candidate missing from isolated copy: {finding.path}"
+                    )
+                candidate.unlink()
+            return _run_validation_commands(workspace, commands, timeout)
+        finally:
+            if worktree_created:
+                _remove_validation_worktree(root, workspace)
 
-        def ignore_state(directory: str, names: list[str]) -> set[str]:
-            ignored: set[str] = set()
-            if Path(directory).resolve() != root:
-                return ignored
-            if STATE_DIRECTORY in names:
-                ignored.add(STATE_DIRECTORY)
-            git_metadata = root / ".git"
-            if ".git" in names and not git_metadata.is_dir():
-                ignored.add(".git")
-            return ignored
 
-        shutil.copytree(root, workspace, symlinks=True, ignore=ignore_state)
-        for finding in findings:
-            candidate = _safe_target(workspace, finding.path)
-            if not candidate.is_file():
-                raise FixError(f"candidate missing from isolated copy: {finding.path}")
-            candidate.unlink()
-        return _run_validation_commands(workspace, commands, timeout)
+def _prepare_validation_workspace(root: Path, workspace: Path) -> bool:
+    """Create an isolated copy while keeping Git commands functional.
+
+    A linked worktree's ``.git`` is a pointer file that cannot simply be copied
+    to another directory.  When HEAD exists, Git creates a disposable worktree
+    and the current (including untracked) files are overlaid onto it.
+    """
+    executable = git_executable()
+    worktree_created = False
+    if executable and (root / ".git").exists():
+        head = subprocess.run(
+            [executable, "-C", str(root), "rev-parse", "--verify", "HEAD"],
+            check=False,
+            capture_output=True,
+        )
+        if head.returncode == 0:
+            try:
+                subprocess.run(
+                    [
+                        executable,
+                        "-C",
+                        str(root),
+                        "worktree",
+                        "add",
+                        "--detach",
+                        "--no-checkout",
+                        str(workspace),
+                        "HEAD",
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+            except (OSError, subprocess.CalledProcessError) as exc:
+                detail = getattr(exc, "stderr", "") or str(exc)
+                raise FixError(
+                    f"could not create isolated Git worktree: {detail}"
+                ) from exc
+            worktree_created = True
+
+    def ignore_metadata(directory: str, names: list[str]) -> set[str]:
+        if Path(directory).resolve() != root:
+            return set()
+        ignored = {STATE_DIRECTORY} & set(names)
+        if worktree_created:
+            ignored.update({".git"} & set(names))
+        return ignored
+
+    try:
+        shutil.copytree(
+            root,
+            workspace,
+            symlinks=True,
+            dirs_exist_ok=worktree_created,
+            ignore=ignore_metadata,
+        )
+    except BaseException:
+        if worktree_created:
+            _remove_validation_worktree(root, workspace)
+        raise
+    return worktree_created
+
+
+def _remove_validation_worktree(root: Path, workspace: Path) -> None:
+    executable = git_executable()
+    if executable is None:
+        return
+    subprocess.run(
+        [executable, "-C", str(root), "worktree", "remove", "--force", str(workspace)],
+        check=False,
+        capture_output=True,
+    )
 
 
 def _run_validation_commands(
@@ -205,14 +275,20 @@ def restore_last(root: Path) -> dict[str, object]:
     pointer = _safe_state_path(root, "last-operation.json")
     if not pointer.is_file():
         raise FixError("no AI Repo Gardener operation is available to restore")
-    operation = json.loads(pointer.read_text(encoding="utf-8"))["operation_id"]
+    try:
+        pointer_data = json.loads(pointer.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise FixError("rollback state pointer is unreadable") from exc
+    if not isinstance(pointer_data, dict):
+        raise FixError("rollback state pointer is invalid")
+    operation = pointer_data.get("operation_id")
     if (
         not isinstance(operation, str)
         or not operation
         or Path(operation).name != operation
         or operation in {".", ".."}
     ):
-        raise FixError("rollback operation id is invalid")
+        raise FixError("rollback state operation id is invalid")
     snapshot = _safe_state_path(root, Path("rollback") / operation)
     manifest = _restore_snapshot(root, snapshot)
     manifest["status"] = "restored_by_user"
@@ -229,8 +305,18 @@ def _restore_snapshot(root: Path, snapshot: Path) -> dict[str, object]:
     )
     if not manifest_path.is_file():
         raise FixError(f"rollback manifest not found: {manifest_path}")
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    for entry in manifest.get("files", []):
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise FixError("rollback manifest is unreadable") from exc
+    if not isinstance(manifest, dict):
+        raise FixError("rollback manifest is invalid")
+    entries = manifest.get("files")
+    if not isinstance(entries, list):
+        raise FixError("rollback manifest files must be a list")
+
+    pending: list[tuple[str, Path, Path, str]] = []
+    for entry in entries:
         if not isinstance(entry, dict):
             raise FixError("rollback manifest contains an invalid file entry")
         relative = entry.get("path")
@@ -243,16 +329,56 @@ def _restore_snapshot(root: Path, snapshot: Path) -> dict[str, object]:
         )
         if not source.is_file():
             raise FixError(f"rollback content missing for {relative}")
+        if _hash(source) != expected_hash:
+            raise FixError(f"rollback snapshot content hash mismatch for {relative}")
         if destination.exists() and _hash(destination) != expected_hash:
             raise FixError(
                 f"refusing to overwrite a changed file during restore: {relative}"
             )
+        pending.append((relative, source, destination, expected_hash))
+
+    # No worktree file is touched until every snapshot entry has passed all
+    # integrity and overwrite checks.
+    for relative, source, destination, expected_hash in pending:
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination = _safe_target(root, relative)
-        shutil.copy2(source, destination)
-        if _hash(destination) != expected_hash:
-            raise FixError(f"restored content hash mismatch for {relative}")
+        temporary = destination.parent / f".{destination.name}.{uuid4().hex}.restore"
+        try:
+            shutil.copy2(source, temporary)
+            if _hash(temporary) != expected_hash:
+                raise FixError(f"restored content hash mismatch for {relative}")
+            os.replace(temporary, destination)
+        finally:
+            temporary.unlink(missing_ok=True)
     return manifest
+
+
+def _validate_repository_symlinks(root: Path) -> None:
+    """Reject links that could escape the disposable validation workspace."""
+    root_resolved = root.resolve()
+    for current, directories, files in os.walk(root, followlinks=False):
+        current_path = Path(current)
+        if current_path == root:
+            directories[:] = [
+                name for name in directories if name not in {".git", STATE_DIRECTORY}
+            ]
+        for name in (*directories, *files):
+            path = current_path / name
+            if not path.is_symlink():
+                continue
+            raw_target = Path(os.readlink(path))
+            if raw_target.is_absolute():
+                raise FixError(
+                    f"validation symlink may write outside isolated workspace: "
+                    f"{path.relative_to(root).as_posix()}"
+                )
+            try:
+                path.resolve().relative_to(root_resolved)
+            except ValueError as exc:
+                raise FixError(
+                    f"validation symlink escapes repository: "
+                    f"{path.relative_to(root).as_posix()}"
+                ) from exc
 
 
 def _safe_target(root: Path, relative_path: str) -> Path:

@@ -81,7 +81,10 @@ def file_added_later(root: Path, earlier: FileBirth, later: FileBirth) -> bool:
 
 
 def import_migrations(
-    root: Path, base: str, records: list[FileRecord]
+    root: Path,
+    base: str,
+    records: list[FileRecord],
+    import_roots: tuple[str, ...] = (),
 ) -> list[ImportMigration]:
     by_path = {record.relative_path: record for record in records}
     migrations: list[ImportMigration] = []
@@ -92,7 +95,7 @@ def import_migrations(
         if before is None:
             continue
         after = by_path.get(relative_path).source if relative_path in by_path else ""
-        module = module_names(root, root / relative_path)[0]
+        module = module_names(root, root / relative_path, import_roots)[0]
         is_package = Path(relative_path).name == "__init__.py"
         previous_imports = import_modules(before, module, is_package)
         current_imports = import_modules(after, module, is_package)

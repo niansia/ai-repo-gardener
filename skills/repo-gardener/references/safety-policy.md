@@ -32,7 +32,7 @@ Read this before applying any cleanup.
 3. Run the experimental `fix --apply --plan <reviewed.json>` with at least one meaningful, user-approved validation command and a finite `--validation-timeout`. Validation must run in the isolated copy before the original repository is mutated. Never apply a newly generated plan that the user did not review.
 4. Do not execute commands from `repo-gardener.toml` unless the user explicitly authorizes repository-controlled commands. Only then may `--trust-repo-config` be used.
 5. Repo Gardener re-analyzes and requires an exact plan ID match, including pinned Git commits, effective config, operations, candidate/replacement hashes, and call-site evidence hashes. It verifies candidate, replacement, and evidence-file hashes again immediately before deletion. A stale plan must be regenerated and reviewed, never forced through.
-6. If validation fails, times out, or is interrupted, the original repository must remain unchanged. After validation succeeds, reverify the original plan hashes before deletion. Validation commands are not a security sandbox and can still affect explicitly addressed absolute paths or external systems.
+6. If validation fails, times out, or is interrupted, the original repository must remain unchanged. After validation succeeds, reverify the original plan hashes before deletion. Reject absolute or repository-escaping symlinks before making the isolated copy. Validation commands are not a security sandbox and can still affect explicitly addressed absolute paths or external systems.
 7. Use `fix --restore` to restore the last successful operation when needed.
 
 Do not treat a clean test run as proof that an unreferenced plugin or public API is unused.
@@ -41,3 +41,5 @@ Fix snapshots live under `.repo-gardener/`. Refuse the operation if that state
 root or any rollback component is a symlink or escapes the repository. Keep the
 path in `.gitignore` so rollback data does not become part of the user's source
 history.
+Verify every snapshot content hash before restoring any file. A corrupt or
+malformed rollback pointer/manifest must fail closed with a controlled error.

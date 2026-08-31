@@ -27,53 +27,45 @@ class ModuleGraph:
                     self.edges[module].add(target)
                     self.inbound[target].add(module)
             for dynamic in record.dynamic_refs:
-                target = self._resolve_one(dynamic.split(":", 1)[0])
-                if target:
+                for target in self.resolve_modules(dynamic.split(":", 1)[0]):
                     self.edges[module].add(target)
                     self.inbound[target].add(module)
         for configured in configured_roots:
-            resolved = self._resolve_one(configured)
-            if resolved:
-                self.roots.add(resolved)
+            self.roots.update(self.resolve_modules(configured))
         self.reachable = self._reachable_from_roots()
 
     @staticmethod
-    def _aliases(records: list[FileRecord]) -> dict[str, str]:
-        aliases: dict[str, str] = {}
-        ambiguous: set[str] = set()
+    def _aliases(records: list[FileRecord]) -> dict[str, set[str]]:
+        aliases: dict[str, set[str]] = {}
         for record in records:
             for alias in (record.module, *record.module_aliases):
                 if not alias:
                     continue
-                previous = aliases.get(alias)
-                if previous is not None and previous != record.module:
-                    ambiguous.add(alias)
-                else:
-                    aliases[alias] = record.module
-        for alias in ambiguous:
-            aliases.pop(alias, None)
+                aliases.setdefault(alias, set()).add(record.module)
         return aliases
 
     def _resolve_targets(self, module: str, names: tuple[str, ...]) -> set[str]:
         targets: set[str] = set()
-        direct = self._resolve_one(module)
-        if direct:
-            targets.add(direct)
+        targets.update(self.resolve_modules(module))
         for name in names:
-            child = self._resolve_one(f"{module}.{name}" if module else name)
-            if child:
-                targets.add(child)
+            targets.update(self.resolve_modules(f"{module}.{name}" if module else name))
         return targets
 
-    def _resolve_one(self, imported: str) -> str | None:
+    def resolve_modules(self, imported: str) -> set[str]:
+        """Resolve every plausible local owner for an import spelling.
+
+        Import roots can legitimately create the same spelling (for example
+        ``foo.py`` and ``src/foo.py``).  Dropping the ambiguous alias would
+        make both modules appear unused, which is unsafe for garbage collection.
+        """
         if imported in self.aliases:
-            return self.aliases[imported]
+            return set(self.aliases[imported])
         parts = imported.split(".")
         for end in range(len(parts) - 1, 0, -1):
             candidate = ".".join(parts[:end])
             if candidate in self.aliases:
-                return self.aliases[candidate]
-        return None
+                return set(self.aliases[candidate])
+        return set()
 
     def _reachable_from_roots(self) -> set[str]:
         reached: set[str] = set()

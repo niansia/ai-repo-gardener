@@ -52,7 +52,54 @@ def test_flat_directory_reports_import_affinity_clusters(tmp_path: Path) -> None
         if any(move["from"] == "vector_store.py" for move in plan["moves"])
     )
     assert vector_plan["target_directory"] == "store"
+    assert vector_plan["package_init"]["semantic_review_required"] is True
+    assert vector_plan["target_collisions"] == []
+    assert vector_plan["relative_import_files"] == []
+    assert vector_plan["resource_relative_files"] == []
+    assert all(
+        rewrite["to_module"].startswith("store.")
+        for rewrite in vector_plan["import_rewrites"]
+    )
     assert report.metrics["structure_entropy"]["score"] > 0
+
+
+def test_structure_plan_surfaces_move_collisions_and_resource_semantics(
+    tmp_path: Path,
+) -> None:
+    write_project(
+        tmp_path,
+        {
+            "repo-gardener.toml": "[analysis]\nflat_directory_threshold = 4",
+            "app.py": "import auth\nimport token\n\nif __name__ == '__main__':\n    pass",
+            "auth.py": "from . import token\nRESOURCE = __file__\n",
+            "token.py": "def issue():\n    return 'token'\n",
+            "auth/auth.py": "EXISTING = True\n",
+            "search.py": "import vector_store\n",
+            "vector_store.py": "def lookup():\n    return []\n",
+            "store": "blocks the other proposed directory",
+        },
+    )
+
+    finding = next(
+        item
+        for item in Analyzer(tmp_path).report("structure").findings
+        if item.rule == "flat-directory"
+    )
+    plans = next(
+        item["value"] for item in finding.evidence if item["type"] == "migration_plan"
+    )
+    auth_plan = next(
+        plan
+        for plan in plans
+        if any(move["from"] == "auth.py" for move in plan["moves"])
+    )
+
+    assert "auth/auth.py" in auth_plan["target_collisions"]
+    assert "auth.py" in auth_plan["relative_import_files"]
+    assert "auth.py" in auth_plan["resource_relative_files"]
+    assert auth_plan["risk"] == "high"
+    store_plan = next(plan for plan in plans if plan["target_directory"] == "store")
+    assert "store" in store_plan["target_collisions"]
 
 
 def test_structure_uses_git_change_coupling_for_disconnected_domains(
@@ -318,6 +365,50 @@ def PublicCamelCase(value):
     assert complex_names.top_level_functions == 3
     assert complex_names.snake_case_functions == 2
     assert complex_names.function_name_words >= 9
+
+
+def test_agentic_style_inflation_features_are_extracted(tmp_path: Path) -> None:
+    write_project(
+        tmp_path,
+        {
+            "agentic.py": """
+import logging
+
+logger = logging.getLogger(__name__)
+
+def _tiny(value):
+    return value.strip()
+
+def wrapper(value):
+    return _tiny(value)
+
+def process(config, value):
+    if value is not None and value != "" and len(str(value)) > 0:
+        logger.info("First, process the result")
+        result = config.get("outer", {}).get("inner", value)
+        return result
+
+def risky():
+    try:
+        return process({}, "x")
+    except Exception:
+        logger.exception("Then report the failure")
+        raise
+""",
+        },
+    )
+
+    analyzer = Analyzer(tmp_path)
+    analyzer.report("style")
+    metrics = analyzer.records[0].style
+
+    assert metrics.defensive_guards == 1
+    assert metrics.single_use_tiny_helpers >= 1
+    assert metrics.wrapper_functions >= 1
+    assert metrics.log_then_reraise_handlers == 1
+    assert metrics.redundant_temp_returns == 1
+    assert metrics.mapping_get_calls == 2
+    assert metrics.narration_logging_calls == 2
 
 
 def test_low_support_ratio_features_are_not_treated_as_style_drift(

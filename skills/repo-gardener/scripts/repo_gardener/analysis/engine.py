@@ -22,7 +22,7 @@ from ..git_support import (
 from ..graph import ModuleGraph
 from ..models import FileRecord, Finding, Report
 from ..packaging_metadata import discover_packaging_metadata
-from ..parsing import parse_file, parse_source, populate_style
+from ..parsing import flush_parse_cache, parse_file, parse_source, populate_style
 from .dependencies import dependency_leftover_findings
 from .stale import stale_findings
 from .structure import StructureAnalysis, analyze_structure
@@ -35,8 +35,10 @@ class Analyzer:
         self.root = root.resolve()
         self.config: Config = load_config(self.root, config_path)
         packaging = discover_packaging_metadata(self.root, self.config)
+        self.import_roots = packaging.import_roots
         entrypoint_modules = set(packaging.entrypoint_modules)
         self.records = self._load_records(entrypoint_modules)
+        flush_parse_cache()
         for record in self.records:
             record.packaged_public_module = bool(
                 {record.module, *record.module_aliases} & packaging.public_modules
@@ -73,7 +75,7 @@ class Analyzer:
             raise ValueError(f"Git base cannot be resolved: {base}")
         git_available = bool(base) and repository_has_git
         migrations = (
-            import_migrations(self.root, base, self.records)
+            import_migrations(self.root, base, self.records, self.import_roots)
             if git_available and base
             else []
         )
@@ -102,6 +104,7 @@ class Analyzer:
                 self.graph,
                 self.config,
                 affinity,
+                self.root,
             )
         findings = self._run_modes(
             modes,
@@ -130,6 +133,7 @@ class Analyzer:
                 for record in self.records
                 if record.parse_error is not None
             ),
+            "parse_cache_hits": sum(record.parse_cache_hit for record in self.records),
             "experimental_analysis": experimental,
         }
         if base:
@@ -155,7 +159,7 @@ class Analyzer:
         used_modules: set[str] = set()
         for path in discover_python_files(self.root, self.config):
             relative = path.relative_to(self.root).as_posix()
-            aliases = module_names(self.root, path)
+            aliases = module_names(self.root, path, self.import_roots)
             module = next(
                 (name for name in aliases if name not in used_modules), aliases[0]
             )
@@ -192,7 +196,7 @@ class Analyzer:
             if self.config.is_excluded(relative):
                 continue
             path = self.root / relative
-            aliases = module_names(self.root, path)
+            aliases = module_names(self.root, path, self.import_roots)
             module = next(
                 (name for name in aliases if name not in used_modules), aliases[0]
             )

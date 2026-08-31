@@ -12,7 +12,7 @@ from conftest import write_project
 from repo_gardener import fixes as fixes_module
 from repo_gardener.analysis import Analyzer
 from repo_gardener.cli import main
-from repo_gardener.fixes import FixError, apply_deletions
+from repo_gardener.fixes import FixError, apply_deletions, restore_last
 from repo_gardener.git_support import git_executable
 from repo_gardener.models import Finding
 
@@ -62,8 +62,6 @@ def test_successful_apply_can_be_restored(tmp_path: Path) -> None:
     assert manifest["status"] == "applied"
     assert manifest["validation_mode"] == "isolated_copy"
     assert not (tmp_path / "parser_old.py").exists()
-
-    from repo_gardener.fixes import restore_last
 
     restored = restore_last(tmp_path)
     assert restored["status"] == "restored_by_user"
@@ -686,6 +684,139 @@ def test_gitignore_is_respected_without_a_git_repository(tmp_path: Path) -> None
     report = Analyzer(tmp_path).report("scan")
 
     assert report.metrics["python_files"] == 1
+
+
+def test_gitignore_negation_is_respected_without_a_git_repository(
+    tmp_path: Path,
+) -> None:
+    write_project(
+        tmp_path,
+        {
+            ".gitignore": "*.py\n!keep.py",
+            "keep.py": "VALUE = 'keep'",
+            "ignored.py": "VALUE = 'ignored'",
+        },
+    )
+
+    report = Analyzer(tmp_path).report("scan")
+
+    assert report.metrics["python_files"] == 1
+    assert (
+        next(record.relative_path for record in Analyzer(tmp_path).records) == "keep.py"
+    )
+
+
+def test_restore_rejects_tampered_snapshot_before_touching_worktree(
+    tmp_path: Path,
+) -> None:
+    source = "def parse(value):\n    return value.strip()\n"
+    write_project(tmp_path, {"parser_old.py": source})
+    finding = Finding(
+        rule="stale-file",
+        category="repo-gc",
+        severity="warning",
+        confidence=0.95,
+        risk=0.0,
+        path="parser_old.py",
+        replacement="parser.py",
+        recommendation="safe_delete_candidate",
+    ).finalize()
+    command = f'"{sys.executable}" -c "import sys; sys.exit(0)"'
+    manifest = apply_deletions(tmp_path, [finding], [command])
+    snapshot = (
+        tmp_path
+        / ".repo-gardener"
+        / "rollback"
+        / str(manifest["operation_id"])
+        / "files"
+        / "parser_old.py"
+    )
+    snapshot.write_text("TAMPERED\n", encoding="utf-8")
+
+    with pytest.raises(FixError, match="snapshot.*hash|content hash"):
+        restore_last(tmp_path)
+
+    assert not (tmp_path / "parser_old.py").exists()
+
+
+def test_restore_rejects_malformed_pointer_without_key_error(
+    tmp_path: Path, capsys
+) -> None:
+    state = tmp_path / ".repo-gardener"
+    state.mkdir()
+    (state / "last-operation.json").write_text("{}", encoding="utf-8")
+
+    assert main(["fix", str(tmp_path), "--restore"]) == 2
+    assert "rollback state" in capsys.readouterr().err
+
+
+def test_linked_worktree_validation_can_use_git_metadata(tmp_path: Path) -> None:
+    executable = git_executable()
+    if executable is None:
+        pytest.skip("git is unavailable")
+    repository = tmp_path / "repository"
+    linked = tmp_path / "linked"
+    write_project(
+        repository,
+        {
+            "parser_old.py": "VALUE = 'old'",
+            "parser.py": "VALUE = 'new'",
+        },
+    )
+    _git(executable, repository, "init")
+    _git(executable, repository, "config", "user.email", "tests@example.com")
+    _git(executable, repository, "config", "user.name", "Repo Gardener Tests")
+    _git(executable, repository, "add", ".")
+    _git(executable, repository, "commit", "-m", "baseline")
+    _git(executable, repository, "worktree", "add", "--detach", str(linked))
+    finding = Finding(
+        rule="stale-file",
+        category="repo-gc",
+        severity="warning",
+        confidence=0.95,
+        risk=0.0,
+        path="parser_old.py",
+        replacement="parser.py",
+        recommendation="safe_delete_candidate",
+    ).finalize()
+
+    manifest = apply_deletions(linked, [finding], ["git status --porcelain"])
+
+    assert manifest["status"] == "applied"
+    assert not (linked / "parser_old.py").exists()
+
+
+def test_validation_rejects_repository_symlink_that_escapes_workspace(
+    tmp_path: Path,
+) -> None:
+    source = "def parse(value):\n    return value.strip()\n"
+    outside = tmp_path.parent / f"{tmp_path.name}-validation-outside"
+    outside.mkdir()
+    write_project(tmp_path, {"parser_old.py": source})
+    try:
+        (tmp_path / "external_link").symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlink creation is unavailable")
+    finding = Finding(
+        rule="stale-file",
+        category="repo-gc",
+        severity="warning",
+        confidence=0.95,
+        risk=0.0,
+        path="parser_old.py",
+        replacement="parser.py",
+        recommendation="safe_delete_candidate",
+    ).finalize()
+    command = (
+        f'"{sys.executable}" -c "from pathlib import Path; '
+        "Path('external_link/leaked.txt').write_text('LEAK')\""
+    )
+
+    with pytest.raises(FixError, match="symlink.*outside|escapes.*symlink"):
+        apply_deletions(tmp_path, [finding], [command])
+
+    assert not (outside / "leaked.txt").exists()
+    assert (tmp_path / "parser_old.py").is_file()
 
 
 def test_skill_path_points_to_complete_portable_skill(capsys) -> None:

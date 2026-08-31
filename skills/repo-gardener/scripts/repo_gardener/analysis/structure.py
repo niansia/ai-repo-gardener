@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass
@@ -53,6 +54,7 @@ def analyze_structure(
     graph: ModuleGraph,
     config: Config,
     change_affinity: dict[tuple[str, str], float] | None = None,
+    root: Path | None = None,
 ) -> StructureAnalysis:
     by_directory: dict[str, list[FileRecord]] = defaultdict(list)
     for record in records:
@@ -70,6 +72,7 @@ def analyze_structure(
             graph,
             config,
             change_affinity or {},
+            root,
         )
         directory_metrics.append(metric)
         if finding is not None:
@@ -103,11 +106,12 @@ def _directory_analysis(
     graph: ModuleGraph,
     config: Config,
     change_affinity: dict[tuple[str, str], float],
+    root: Path | None,
 ) -> tuple[dict[str, object], Finding | None]:
     affinities = _pair_affinities(members, graph, change_affinity)
     clusters = _clusters(members, graph, affinities)
     entropy = _entropy_factors(members, graph, config, clusters)
-    plans = _migration_plans(directory, clusters, all_records, graph)
+    plans = _migration_plans(directory, clusters, all_records, graph, root)
     entropy_after = max(0.0, float(entropy["score"]) - _estimated_entropy_gain(plans))
     metric = {
         "path": directory,
@@ -330,10 +334,12 @@ def _migration_plans(
     clusters: list[dict[str, object]],
     all_records: list[FileRecord],
     graph: ModuleGraph,
+    root: Path | None,
 ) -> list[dict[str, object]]:
     by_module = {record.module: record for record in all_records}
     plans: list[dict[str, object]] = []
     used_targets: Counter[str] = Counter()
+    existing_paths = {record.relative_path for record in all_records}
     for cluster in clusters:
         label = _safe_directory_name(str(cluster["label"]))
         used_targets[label] += 1
@@ -344,6 +350,10 @@ def _migration_plans(
         moves = []
         external_importers: set[str] = set()
         string_reference_files: set[str] = set()
+        relative_import_files: set[str] = set()
+        resource_relative_files: set[str] = set()
+        target_collisions: set[str] = set()
+        import_rewrites: list[dict[str, object]] = []
         rewrite_count = 0
         package_surface = False
         for module in sorted(modules):
@@ -366,18 +376,62 @@ def _migration_plans(
                 )
             )
             package_surface = package_surface or record.possible_package_module
+            target_path = f"{target_directory}/{record.path.name}"
+            target_exists = target_path in existing_paths or bool(
+                root is not None and (root / target_path).exists()
+            )
+            if target_exists and target_path != record.relative_path:
+                target_collisions.add(target_path)
+            tree = record.tree
+            if tree is not None:
+                if any(
+                    isinstance(node, ast.ImportFrom) and node.level > 0
+                    for node in ast.walk(tree)
+                ):
+                    relative_import_files.add(record.relative_path)
+                if any(
+                    isinstance(node, ast.Name) and node.id == "__file__"
+                    for node in ast.walk(tree)
+                ):
+                    resource_relative_files.add(record.relative_path)
+            new_module = _module_after_move(record, label)
+            import_rewrites.append(
+                {
+                    "from_module": record.module,
+                    "to_module": new_module,
+                    "importer_files": sorted(
+                        by_module[user].relative_path
+                        for user in importers
+                        if user in by_module
+                    ),
+                }
+            )
             moves.append(
                 {
                     "from": record.relative_path,
-                    "to": f"{target_directory}/{record.path.name}",
+                    "to": target_path,
                     "module": record.module,
+                    "new_module": new_module,
                 }
             )
+        package_init_path = f"{target_directory}/__init__.py"
+        package_init_exists = package_init_path in existing_paths or bool(
+            root is not None and (root / package_init_path).is_file()
+        )
+        if (
+            root is not None
+            and (root / target_directory).exists()
+            and not (root / target_directory).is_dir()
+        ):
+            target_collisions.add(target_directory)
         risk = (
             "high"
-            if string_reference_files
+            if target_collisions or string_reference_files or resource_relative_files
             else "medium"
-            if rewrite_count > 8 or package_surface
+            if rewrite_count > 8
+            or package_surface
+            or relative_import_files
+            or not package_init_exists
             else "low"
         )
         plans.append(
@@ -386,13 +440,29 @@ def _migration_plans(
                 "target_directory": target_directory,
                 "moves": moves,
                 "imports_to_rewrite": rewrite_count,
+                "import_rewrites": import_rewrites,
                 "external_importers": sorted(external_importers),
                 "string_reference_files": sorted(string_reference_files),
+                "relative_import_files": sorted(relative_import_files),
+                "resource_relative_files": sorted(resource_relative_files),
+                "target_collisions": sorted(target_collisions),
+                "package_init": {
+                    "path": package_init_path,
+                    "exists": package_init_exists,
+                    "semantic_review_required": not package_init_exists,
+                },
                 "risk": risk,
                 "apply_supported": False,
             }
         )
     return plans
+
+
+def _module_after_move(record: FileRecord, label: str) -> str:
+    parts = record.module.split(".")
+    if record.path.name == "__init__.py":
+        return ".".join((*parts, label))
+    return ".".join((*parts[:-1], label, parts[-1]))
 
 
 def _estimated_entropy_gain(plans: list[dict[str, object]]) -> float:

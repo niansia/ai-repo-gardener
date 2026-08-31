@@ -51,3 +51,8 @@ not an upper-bound guarantee.
 
 This is a regression smoke test, not a labeled precision benchmark. It does not
 justify a precision percentage.
+
+Alpha.9 adds an external, content-addressed cache for unchanged parse records.
+The first run remains a cold scan; subsequent runs report reuse through
+`metrics.parse_cache_hits`. No new cross-machine timing is claimed here until
+the pinned real-repository table is rerun under the release workflow.

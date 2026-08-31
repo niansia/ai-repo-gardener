@@ -1,9 +1,9 @@
 # Adversarial safety benchmark
 
-Run on 2026-08-31 with Python 3.12. The alpha.8 suite contains 117 tests. The
-local Windows gate passes 114 and skips three real-symlink tests when the
-account cannot create symlinks. Linux and macOS alpha.8 status must come from
-the hosted matrix after push. This table isolates twenty-five cases where a
+Run on 2026-08-31 with Python 3.12. The alpha.9 suite contains 146 tests. The
+local Windows gate passes 142 and skips four real-symlink tests when the
+account cannot create symlinks. Linux and macOS alpha.9 status must come from
+the hosted matrix after push. This table isolates twenty-nine cases where a
 normal import graph can make live or user-modified code look unused.
 
 | Scenario | Required outcome | Result |
@@ -33,8 +33,12 @@ normal import graph can make live or user-modified code look unused.
 | Partial replacement missing public symbols | Review only | Pass |
 | Monkeypatch string module path | Keep referenced module | Pass |
 | Framework-discovered FastAPI/Flask/Click/Typer entrypoint | Keep reachable modules | Pass |
+| Framework constructors/decorators imported through module, symbol, or assignment aliases | Keep reachable modules | Pass |
+| Ambiguous import spelling shared by a root module and configured source root | Keep every possible local target reachable | Pass |
+| Reflective `__dict__`, `vars`, or `__getattribute__` loader lookup | Disable automatic deletion repo-wide | Pass |
+| PyPA import-name metadata, dynamic public metadata, and custom setuptools source roots | Protect public modules or disable automatic deletion when unresolved | Pass |
 
-Eligible-deletion false positives in these adversarial cases: **0 / 25**.
+Eligible-deletion false positives in these adversarial cases: **0 / 29**.
 
 Transactional gates also verify that `--apply` refuses to run without a reviewed
 plan and rejects a repository whose current operation set has grown since the
@@ -44,6 +48,12 @@ rechecked at the final mutation boundary.
 Validation failure, timeout, and side-effect tests verify that commands run in
 an isolated copy and leave the original tree unchanged. State-root and nested
 rollback symlink tests verify that `.repo-gardener` cannot escape the repository.
+Linked-worktree tests verify that isolated validation retains functional Git
+metadata. Repository-symlink tests verify that relative validation effects
+cannot escape the disposable workspace. Snapshot corruption is rejected before
+any working-tree file is restored, and malformed rollback state returns a
+controlled CLI error rather than a traceback.
+
 Malformed configuration types are rejected before analysis rather than coerced
 into safety overrides.
 
@@ -57,6 +67,7 @@ python -m pytest
 
 The hosted CI matrix is configured to run the suite on Windows, Ubuntu, and
 macOS with Python 3.11 through 3.14, and validates the bundled skill with a
-pinned revision of the official Agent Skills reference validator. The macOS
-matrix was added after the local benchmark above; its status must come from the
-hosted run rather than being inferred here.
+pinned revision of the official Agent Skills reference validator. The tagged
+release workflow builds one wheel, tests that exact artifact across the same
+12-job matrix, emits a provenance attestation, and publishes that same wheel.
+Hosted status must come from the workflow rather than being inferred here.

@@ -30,3 +30,17 @@ def test_assignment_alias_extraction_is_cached(
 
     assert {"importlib", "il", "il2"} <= first
     assert walk_count == 1
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'import importlib\nloader = importlib.__dict__["import_module"]\nloader(name)\n',
+        'import importlib\nloader = vars(importlib)["import_module"]\nloader(name)\n',
+        'import importlib\nloader = importlib.__getattribute__("import_module")\nloader(name)\n',
+    ],
+)
+def test_reflective_loader_lookup_is_opaque(source: str) -> None:
+    references = RuntimeReferenceScanner(ast.parse(source)).scan()
+
+    assert references.opaque_discovery is True

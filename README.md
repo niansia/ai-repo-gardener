@@ -1,13 +1,13 @@
 # AI Repo Gardener
 
 [![CI](https://github.com/niansia/ai-repo-gardener/actions/workflows/ci.yml/badge.svg)](https://github.com/niansia/ai-repo-gardener/actions/workflows/ci.yml)
-[![GitHub prerelease](https://img.shields.io/github/v/release/niansia/ai-repo-gardener?include_prereleases&label=release)](https://github.com/niansia/ai-repo-gardener/releases/tag/v0.1.0-alpha.8)
+[![GitHub prerelease](https://img.shields.io/github/v/release/niansia/ai-repo-gardener?include_prereleases&label=release)](https://github.com/niansia/ai-repo-gardener/releases/tag/v0.1.0-alpha.9)
 
 **Find files the AI forgot to delete.**
 
 AI Repo Gardener is a deterministic garbage collector for AI-edited Python
 repositories. The package, CLI, and portable Skill keep the concise
-`repo-gardener` identifier. Version `0.1.0a8` covers three evidence systems:
+`repo-gardener` identifier. Version `0.1.0a9` covers three evidence systems:
 repository garbage collection, folder-architecture pressure, and
 baseline-relative Python house-style drift. Weak guesses never become
 automatic deletions or automatic moves.
@@ -56,12 +56,17 @@ committed range.
 - Both conventional `src/package` imports and literal `src.package` imports.
 - Worktree, staged, committed-range, and untracked changes in `diff` mode.
 - Built-in entrypoint recognition for FastAPI, Flask, Django, Click, and Typer.
+- Import- and constructor-alias-aware framework discovery. Ambiguous import-root
+  spellings keep every possible local module reachable instead of dropping the
+  edge.
 - Alias-propagating runtime reference detection for `importlib`, `runpy`,
   `builtins`, `pkgutil`, `pkg_resources`, file-path loaders, module-shaped
   strings, and escaped dynamic-loader callables.
 - Python packaging roots from `pyproject.toml`, `setup.cfg`, and literal
-  `setup.py` entry points. Setuptools `py_modules` declarations are protected
-  as public distribution APIs; unresolved legacy metadata disables auto-delete.
+  `setup.py` entry points, `package-dir`, and package discovery roots. PyPA
+  `import-names`/`import-namespaces` and setuptools `py_modules` declarations
+  are protected as public distribution APIs; dynamic or unresolved metadata
+  disables auto-delete.
 - Stable versioned JSON for agents and CI.
 - UTF-8 BOM and ordinary UTF-8/CRLF Python sources are parsed consistently;
   any remaining parse failure is shown in both pretty and JSON output.
@@ -88,7 +93,7 @@ Python 3.11 through 3.14. Platform support is claimed from hosted runs, not
 inferred from a single local machine.
 
 ```bash
-python -m pip install "https://github.com/niansia/ai-repo-gardener/releases/download/v0.1.0-alpha.8/repo_gardener-0.1.0a8-py3-none-any.whl"
+python -m pip install "https://github.com/niansia/ai-repo-gardener/releases/download/v0.1.0-alpha.9/repo_gardener-0.1.0a9-py3-none-any.whl"
 repo-gardener --version
 repo-gardener diff /path/to/project --base HEAD~1
 repo-gardener fix /path/to/project --base HEAD~1 --dry-run
@@ -151,7 +156,9 @@ Structure reports a deterministic 0–100 pressure score with flatness,
 directory load, cohesion, generic-module pressure, and domain-fragmentation
 factors. Domain affinity combines imports, recent Git co-change history, and
 symbol vocabulary. Credible partitions include a target folder, exact file
-moves, importer rewrite count, string-reference evidence, and risk. Plans set
+moves and module-name rewrites, target collisions, package-initialization
+semantics, relative-import and `__file__` resource risks, string-reference
+evidence, and risk. Plans set
 `apply_supported: false`; one giant connected component is still reported only
 as factual directory load rather than a fabricated partition.
 
@@ -168,7 +175,10 @@ The extractor includes Python-specific conventions: builtin vs `typing`
 generics, `X | None` vs `Optional[X]`, `Path` vs `os.path`, comprehension vs
 manual-loop preference, dataclass/TypedDict vs bare dictionaries, and logging
 vs `print`. It also measures branch/cyclomatic complexity, private-helper
-ratio, snake-case function naming, and function-name word count. Ratio features
+ratio, snake-case function naming, function-name word count, multi-clause
+defensive guards, single-use tiny helpers, thin wrappers,
+log-then-reraise handlers, redundant temporary-return pairs, repeated mapping
+`.get()` calls, and narration-style logging. Ratio features
 carry their observation support; low-support conventions such as one `Path`
 call are excluded before scoring. Fewer than five supported baseline files
 produces no finding; fewer than 20 cannot produce high confidence.
@@ -228,7 +238,11 @@ opt-in to execute commands supplied by that repository and should only be used
 after review. Validation runs against an isolated copy where the planned
 candidate files have already been removed. Only after validation succeeds does
 AI Repo Gardener reverify the original hashes and perform the real deletion.
-Relative-path validation side effects stay in the disposable copy. This is not
+Regular and linked Git worktrees use a disposable Git worktree, so Git-based
+validation remains functional. Repository symlinks that are absolute or escape
+the repository are rejected before validation because they could route a
+relative-path side effect outside the disposable workspace. Other relative-path
+validation side effects stay in the disposable copy. This is not
 a command sandbox: commands that address absolute paths or external services
 can still affect them. Each command has a 300-second default timeout; set a
 different positive limit with `--validation-timeout`.
@@ -245,6 +259,18 @@ at the state root or any rollback path are refused. Manual rollback restores the
 deleted candidate files. Validation does not run in the original working tree,
 so its ordinary relative-path cache, coverage, generated-file, or test-fixture
 side effects are discarded with the isolated copy.
+
+Unchanged Python files use a content-addressed parse cache outside the target
+repository (`%LOCALAPPDATA%/repo-gardener/cache` on Windows or the XDG cache
+directory on Unix). `metrics.parse_cache_hits` reports reuse. Set
+`REPO_GARDENER_DISABLE_CACHE=1` to disable it or
+`REPO_GARDENER_CACHE_DIR` to choose a different parent directory. Source text
+is not stored in the cache, and changing file content invalidates the entry.
+
+Tagged releases use a build-once pipeline: one wheel is built, installed and
+tested outside the source tree on all 12 OS/Python combinations, validated as a
+portable Skill, dogfooded, provenance-attested, and only then attached to the
+GitHub prerelease. Third-party Actions are pinned to full commit SHAs.
 
 The JSON contract is documented in
 [`skills/repo-gardener/references/finding-schema.md`](skills/repo-gardener/references/finding-schema.md).

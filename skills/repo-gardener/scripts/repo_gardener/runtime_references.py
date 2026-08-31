@@ -45,6 +45,8 @@ class RuntimeReferenceScanner:
         )
         opaque = self._dangerous_callable_escapes(dangerous_callables)
         for node in self._nodes:
+            if _is_reflective_loader_lookup(node, reflection_owners):
+                opaque = True
             if not isinstance(node, ast.Call):
                 continue
             name = dotted_name(node.func)
@@ -395,17 +397,61 @@ def _is_loader_reflection(node: ast.Call, owners: set[str]) -> bool:
     attribute = node.args[1]
     if not isinstance(attribute, ast.Constant) or not isinstance(attribute.value, str):
         return True
-    return attribute.value in {
-        "SourceFileLoader",
-        "SourcelessFileLoader",
-        "__import__",
-        "entry_points",
-        "exec_module",
-        "import_module",
-        "iter_entry_points",
-        "iter_modules",
-        "run_module",
-        "run_path",
-        "spec_from_file_location",
-        "walk_packages",
-    }
+    return attribute.value in _LOADER_ATTRIBUTES
+
+
+_LOADER_ATTRIBUTES = {
+    "SourceFileLoader",
+    "SourcelessFileLoader",
+    "__import__",
+    "entry_points",
+    "exec_module",
+    "import_module",
+    "iter_entry_points",
+    "iter_modules",
+    "run_module",
+    "run_path",
+    "spec_from_file_location",
+    "walk_packages",
+}
+
+
+def _is_reflective_loader_lookup(node: ast.AST, owners: set[str]) -> bool:
+    """Recognize common reflective access to dynamic-loading callables.
+
+    These expressions deliberately bypass normal attribute resolution, so their
+    presence vetoes automatic deletion instead of attempting value propagation.
+    """
+    if isinstance(node, ast.Subscript):
+        attribute = _string_constant(node.slice)
+        if attribute not in _LOADER_ATTRIBUTES:
+            return False
+        container = node.value
+        if (
+            isinstance(container, ast.Attribute)
+            and container.attr == "__dict__"
+            and dotted_name(container.value) in owners
+        ):
+            return True
+        return bool(
+            isinstance(container, ast.Call)
+            and dotted_name(container.func) == "vars"
+            and container.args
+            and dotted_name(container.args[0]) in owners
+        )
+    if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+        return False
+    return bool(
+        node.func.attr == "__getattribute__"
+        and dotted_name(node.func.value) in owners
+        and node.args
+        and _string_constant(node.args[0]) in _LOADER_ATTRIBUTES
+    )
+
+
+def _string_constant(node: ast.AST) -> str | None:
+    return (
+        node.value
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+        else None
+    )

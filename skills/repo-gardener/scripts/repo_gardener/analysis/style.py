@@ -22,6 +22,8 @@ FEATURE_MIN_SUPPORT = {
     "print_share_of_output_calls": 3,
     "private_helper_ratio": 3,
     "snake_case_function_ratio": 3,
+    "single_use_tiny_helper_ratio": 3,
+    "wrapper_function_ratio": 3,
 }
 
 
@@ -196,6 +198,13 @@ def _rare_threshold(name: str) -> float:
         "private_helper_ratio": 0.75,
         "snake_case_function_ratio": 0.75,
         "function_name_words_mean": 4.0,
+        "defensive_guards_per_function": 0.5,
+        "single_use_tiny_helper_ratio": 0.75,
+        "wrapper_function_ratio": 0.75,
+        "log_then_reraise_per_function": 0.25,
+        "redundant_temp_returns_per_function": 0.5,
+        "mapping_get_calls_per_function": 2.0,
+        "narration_logging_per_100_loc": 1.0,
     }[name]
 
 
@@ -226,4 +235,11 @@ def _minimum_effect(name: str) -> float:
         "private_helper_ratio": 0.4,
         "snake_case_function_ratio": 0.35,
         "function_name_words_mean": 1.5,
+        "defensive_guards_per_function": 0.5,
+        "single_use_tiny_helper_ratio": 0.4,
+        "wrapper_function_ratio": 0.4,
+        "log_then_reraise_per_function": 0.25,
+        "redundant_temp_returns_per_function": 0.5,
+        "mapping_get_calls_per_function": 1.0,
+        "narration_logging_per_100_loc": 0.75,
     }[name]

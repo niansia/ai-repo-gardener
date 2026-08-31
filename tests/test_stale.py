@@ -969,6 +969,30 @@ def test_config_entrypoint_accepts_object_suffix(tmp_path: Path) -> None:
             "import click\nimport worker\n@click.command()\ndef cli():\n    pass",
             "click",
         ),
+        (
+            "from fastapi import FastAPI as F\nimport worker\napp = F()",
+            "fastapi",
+        ),
+        (
+            "import fastapi as fa\nimport worker\napp = fa.FastAPI()",
+            "fastapi",
+        ),
+        (
+            "from flask import Flask as F\nimport worker\napp = F(__name__)",
+            "flask",
+        ),
+        (
+            "from typer import Typer as T\nimport worker\napp = T()",
+            "typer",
+        ),
+        (
+            "from click import command as cmd\nimport worker\n@cmd()\ndef cli():\n    pass",
+            "click",
+        ),
+        (
+            "from fastapi import FastAPI as F\nimport worker\nAPI = F\napp = API()",
+            "fastapi",
+        ),
     ],
 )
 def test_framework_entrypoints_keep_imported_modules_live(
@@ -990,6 +1014,194 @@ def test_framework_entrypoints_keep_imported_modules_live(
     assert analyzer.records[0].framework_entrypoints or any(
         framework in record.framework_entrypoints for record in analyzer.records
     )
+
+
+def test_ambiguous_import_alias_keeps_every_possible_module_live(
+    tmp_path: Path,
+) -> None:
+    write_project(
+        tmp_path,
+        {
+            "app.py": "import foo\n\nif __name__ == '__main__':\n    print(foo.VALUE)",
+            "foo.py": "VALUE = 'root'",
+            "src/foo.py": "VALUE = 'src'",
+        },
+    )
+
+    analyzer = Analyzer(tmp_path)
+
+    assert {"foo", "src.foo"} <= analyzer.graph.reachable
+    assert analyzer.graph.inbound_count("foo") == 1
+    assert analyzer.graph.inbound_count("src.foo") == 1
+
+
+@pytest.mark.parametrize("metadata_key", ["import-names", "import-namespaces"])
+def test_project_import_metadata_marks_modules_public(
+    tmp_path: Path, metadata_key: str
+) -> None:
+    write_project(
+        tmp_path,
+        {
+            "pyproject.toml": (
+                "[project]\nname = 'demo'\nversion = '0.1.0'\n"
+                f"{metadata_key} = ['legacy ; private']"
+            ),
+            "app.py": "import current\n\nif __name__ == '__main__':\n    pass",
+            "legacy.py": "VALUE = 1",
+            "current.py": "VALUE = 1",
+        },
+    )
+
+    analyzer = Analyzer(tmp_path)
+    legacy = next(record for record in analyzer.records if record.module == "legacy")
+
+    assert legacy.packaged_public_module is True
+
+
+@pytest.mark.parametrize(
+    "dynamic_key",
+    ["scripts", "gui-scripts", "entry-points", "import-names", "import-namespaces"],
+)
+def test_dynamic_public_packaging_metadata_disables_auto_delete(
+    tmp_path: Path, dynamic_key: str
+) -> None:
+    write_project(
+        tmp_path,
+        {
+            "pyproject.toml": (
+                "[project]\nname = 'demo'\nversion = '0.1.0'\n"
+                f"dynamic = ['{dynamic_key}']"
+            ),
+            "app.py": "if __name__ == '__main__':\n    pass",
+            "legacy.py": "VALUE = 1",
+        },
+    )
+
+    analyzer = Analyzer(tmp_path)
+
+    assert any(
+        f"dynamic-{dynamic_key}" in source
+        for record in analyzer.records
+        for source in record.packaging_uncertainty
+    )
+
+
+def test_custom_setuptools_package_root_resolves_entrypoint_module(
+    tmp_path: Path,
+) -> None:
+    write_project(
+        tmp_path,
+        {
+            "pyproject.toml": """
+[project]
+name = "demo"
+version = "0.1.0"
+
+[project.scripts]
+demo = "mypkg.web:main"
+
+[tool.setuptools.package-dir]
+"" = "python"
+""",
+            "python/mypkg/__init__.py": "",
+            "python/mypkg/web.py": "def main():\n    return True",
+        },
+    )
+
+    analyzer = Analyzer(tmp_path)
+    web = next(record for record in analyzer.records if record.path.name == "web.py")
+
+    assert web.module == "mypkg.web"
+    assert "mypkg.web" in analyzer.graph.roots
+
+
+@pytest.mark.parametrize(
+    ("metadata_name", "metadata"),
+    [
+        (
+            "setup.cfg",
+            """
+[metadata]
+name = demo
+version = 0.1.0
+
+[options]
+package_dir =
+    = python
+
+[options.entry_points]
+console_scripts =
+    demo = mypkg.web:main
+""",
+        ),
+        (
+            "setup.py",
+            """
+from setuptools import setup
+
+setup(
+    name="demo",
+    package_dir={"": "python"},
+    entry_points={"console_scripts": ["demo=mypkg.web:main"]},
+)
+""",
+        ),
+        (
+            "pyproject.toml",
+            """
+[project]
+name = "demo"
+version = "0.1.0"
+scripts = { demo = "mypkg.web:main" }
+
+[tool.setuptools.packages.find]
+where = ["python"]
+""",
+        ),
+    ],
+)
+def test_legacy_and_find_where_source_roots_resolve_entrypoints(
+    tmp_path: Path, metadata_name: str, metadata: str
+) -> None:
+    write_project(
+        tmp_path,
+        {
+            metadata_name: metadata,
+            "python/mypkg/__init__.py": "",
+            "python/mypkg/web.py": "def main():\n    return True",
+        },
+    )
+
+    analyzer = Analyzer(tmp_path)
+    web = next(record for record in analyzer.records if record.path.name == "web.py")
+
+    assert web.module == "mypkg.web"
+    assert "mypkg.web" in analyzer.graph.roots
+
+
+def test_unchanged_files_use_external_content_addressed_parse_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cache = tmp_path / "external-cache"
+    repository = tmp_path / "repository"
+    monkeypatch.setenv("REPO_GARDENER_CACHE_DIR", str(cache))
+    write_project(
+        repository,
+        {"app.py": "if __name__ == '__main__':\n    print('ok')\n"},
+    )
+
+    first = Analyzer(repository).report("scan")
+    second = Analyzer(repository).report("scan")
+    (repository / "app.py").write_text(
+        "if __name__ == '__main__':\n    print('changed')\n", encoding="utf-8"
+    )
+    third = Analyzer(repository).report("scan")
+
+    assert first.metrics["parse_cache_hits"] == 0
+    assert second.metrics["parse_cache_hits"] == 1
+    assert third.metrics["parse_cache_hits"] == 0
+    assert cache.is_dir()
+    assert not (repository / ".repo-gardener").exists()
 
 
 def _git(executable: str, root: Path, *arguments: str) -> None:

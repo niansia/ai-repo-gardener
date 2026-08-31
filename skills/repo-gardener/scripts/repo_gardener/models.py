@@ -46,6 +46,13 @@ class StyleMetrics:
     private_helpers: int = 0
     snake_case_functions: int = 0
     function_name_words: int = 0
+    defensive_guards: int = 0
+    single_use_tiny_helpers: int = 0
+    wrapper_functions: int = 0
+    log_then_reraise_handlers: int = 0
+    redundant_temp_returns: int = 0
+    mapping_get_calls: int = 0
+    narration_logging_calls: int = 0
 
     def features(self) -> dict[str, float]:
         funcs = max(self.functions, 1)
@@ -84,6 +91,14 @@ class StyleMetrics:
             / max(self.top_level_functions, 1),
             "snake_case_function_ratio": self.snake_case_functions / funcs,
             "function_name_words_mean": self.function_name_words / funcs,
+            "defensive_guards_per_function": self.defensive_guards / funcs,
+            "single_use_tiny_helper_ratio": self.single_use_tiny_helpers
+            / max(self.top_level_functions, 1),
+            "wrapper_function_ratio": self.wrapper_functions / funcs,
+            "log_then_reraise_per_function": self.log_then_reraise_handlers / funcs,
+            "redundant_temp_returns_per_function": self.redundant_temp_returns / funcs,
+            "mapping_get_calls_per_function": self.mapping_get_calls / funcs,
+            "narration_logging_per_100_loc": self.narration_logging_calls * 100 / loc,
         }
 
     def feature_supports(self) -> dict[str, int]:
@@ -120,6 +135,13 @@ class StyleMetrics:
             "private_helper_ratio": self.top_level_functions,
             "snake_case_function_ratio": self.functions,
             "function_name_words_mean": self.functions,
+            "defensive_guards_per_function": self.functions,
+            "single_use_tiny_helper_ratio": self.top_level_functions,
+            "wrapper_function_ratio": self.functions,
+            "log_then_reraise_per_function": self.functions,
+            "redundant_temp_returns_per_function": self.functions,
+            "mapping_get_calls_per_function": self.functions,
+            "narration_logging_per_100_loc": self.loc,
         }
 
 
@@ -164,6 +186,7 @@ class FileRecord:
     parse_error: str | None = None
     mtime: float = 0.0
     tree: ast.Module | None = field(default=None, repr=False)
+    parse_cache_hit: bool = False
 
 
 @dataclass

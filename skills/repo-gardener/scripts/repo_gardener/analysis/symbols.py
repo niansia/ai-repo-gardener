@@ -233,14 +233,12 @@ def _reference_index(
             references[(record.module, symbol)].add(record.relative_path)
 
         for imported in record.imports:
-            target = _canonical_module(imported.module, graph)
-            if not target:
-                continue
-            for name in imported.names:
-                if name == "*":
-                    wildcard_modules.add(target)
-                elif name in known_symbols.get(target, set()):
-                    references[(target, name)].add(record.relative_path)
+            for target in _canonical_modules(imported.module, graph):
+                for name in imported.names:
+                    if name == "*":
+                        wildcard_modules.add(target)
+                    elif name in known_symbols.get(target, set()):
+                        references[(target, name)].add(record.relative_path)
 
         bindings = _module_bindings(tree, graph)
         for node in ast.walk(tree):
@@ -254,13 +252,14 @@ def _reference_index(
             if not isinstance(node, ast.Attribute):
                 continue
             dotted = dotted_name(node)
-            for prefix, target in bindings.items():
+            for prefix, targets in bindings.items():
                 if not dotted.startswith(prefix + "."):
                     continue
                 remainder = dotted[len(prefix) + 1 :]
                 symbol = remainder.split(".", 1)[0]
-                if symbol in known_symbols.get(target, set()):
-                    references[(target, symbol)].add(record.relative_path)
+                for target in targets:
+                    if symbol in known_symbols.get(target, set()):
+                        references[(target, symbol)].add(record.relative_path)
     return references, wildcard_modules
 
 
@@ -286,24 +285,17 @@ def _local_symbol_references(tree: ast.Module, symbols: set[str]) -> set[str]:
     return result
 
 
-def _module_bindings(tree: ast.Module, graph: ModuleGraph) -> dict[str, str]:
-    bindings: dict[str, str] = {}
+def _module_bindings(tree: ast.Module, graph: ModuleGraph) -> dict[str, set[str]]:
+    bindings: dict[str, set[str]] = {}
     for node in ast.walk(tree):
         if not isinstance(node, ast.Import):
             continue
         for alias in node.names:
-            target = _canonical_module(alias.name, graph)
-            if target:
-                bindings[alias.asname or alias.name] = target
+            targets = _canonical_modules(alias.name, graph)
+            if targets:
+                bindings[alias.asname or alias.name] = targets
     return bindings
 
 
-def _canonical_module(module: str, graph: ModuleGraph) -> str | None:
-    if module in graph.aliases:
-        return graph.aliases[module]
-    parts = module.split(".")
-    for end in range(len(parts) - 1, 0, -1):
-        candidate = ".".join(parts[:end])
-        if candidate in graph.aliases:
-            return graph.aliases[candidate]
-    return None
+def _canonical_modules(module: str, graph: ModuleGraph) -> set[str]:
+    return graph.resolve_modules(module)

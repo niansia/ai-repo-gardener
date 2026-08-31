@@ -27,8 +27,10 @@ non-mutating.
 
 Structure reports include `metrics.structure_entropy`, with a 0–100 pressure
 score, factor breakdown, per-directory measurements, and estimated proposal
-delta. `migration_plan` evidence contains proposed moves, import rewrite count,
-string-reference evidence, risk, and `apply_supported: false`.
+delta. `migration_plan` evidence contains proposed moves, exact old/new module
+rewrite mappings, target collisions, package-init semantics, relative-import
+and resource-path files, string-reference evidence, risk, and
+`apply_supported: false`.
 
 When supplied, `metrics.style_baseline_commit` is the resolved commit used for
 historical style peers. `metrics.style_baseline_mode` is `repository-peers` or
@@ -40,6 +42,8 @@ a `scan` or `diff` run.
 `metrics.parse_errors` is the count of Python files that could not be parsed;
 `metrics.parse_error_files` lists their repository-relative paths. Any nonzero
 count disables automatic deletion and is also surfaced in pretty output.
+`metrics.parse_cache_hits` counts unchanged files whose safe parse record was
+reused from the external content-addressed cache.
 
 Finding IDs are derived from the rule, normalized path, replacement, and evidence fingerprint. Do not assume IDs survive a schema-version change.
 

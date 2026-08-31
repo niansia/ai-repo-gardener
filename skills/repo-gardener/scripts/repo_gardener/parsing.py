@@ -1,13 +1,21 @@
 from __future__ import annotations
 
 import ast
+import atexit
 import io
+import json
 import keyword
+import os
 import re
+import sqlite3
 import statistics
+import sys
+import threading
 import tokenize
 from collections import Counter
+from dataclasses import asdict
 from hashlib import sha256
+from itertools import pairwise
 from pathlib import Path
 
 from .ast_utils import dotted_name
@@ -42,6 +50,11 @@ TEMPORARY_NAMES = {
 }
 WORD_RE = re.compile(r"[A-Za-z][A-Za-z0-9_]+")
 SNAKE_CASE_RE = re.compile(r"^_?[a-z][a-z0-9_]*$")
+PARSE_CACHE_SCHEMA = 1
+_CACHE_LOCK = threading.RLock()
+_CACHE_CONNECTIONS: dict[Path, sqlite3.Connection] = {}
+_CACHE_MEMORY: dict[tuple[Path, str], dict[str, object]] = {}
+_CACHE_DIRTY: set[tuple[Path, str]] = set()
 
 
 def parse_file(
@@ -53,7 +66,25 @@ def parse_file(
     collect_style: bool = False,
 ) -> FileRecord:
     source = path.read_text(encoding="utf-8-sig", errors="replace")
-    return parse_source(
+    cache_key = _parse_cache_key(
+        path, relative_path, module, category, module_aliases, source
+    )
+    cached = (
+        _read_parse_cache(
+            cache_key,
+            path,
+            relative_path,
+            module,
+            category,
+            module_aliases,
+            source,
+        )
+        if not collect_style
+        else None
+    )
+    if cached is not None:
+        return cached
+    record = parse_source(
         source,
         path,
         relative_path,
@@ -63,6 +94,9 @@ def parse_file(
         path.stat().st_mtime,
         collect_style,
     )
+    if not collect_style:
+        _write_parse_cache(cache_key, record)
+    return record
 
 
 def parse_source(
@@ -119,6 +153,210 @@ def populate_style(record: FileRecord) -> None:
     if tree is None:
         return
     record.style = _style_metrics(tree, record.source)
+
+
+def _parse_cache_key(
+    path: Path,
+    relative_path: str,
+    module: str,
+    category: str,
+    module_aliases: tuple[str, ...],
+    source: str,
+) -> str:
+    payload = "\x1f".join(
+        (
+            str(PARSE_CACHE_SCHEMA),
+            f"{sys.version_info.major}.{sys.version_info.minor}",
+            str(path.resolve()),
+            relative_path,
+            module,
+            category,
+            *module_aliases,
+            sha256(source.encode("utf-8")).hexdigest(),
+        )
+    )
+    return sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _parse_cache_root() -> Path | None:
+    if os.environ.get("REPO_GARDENER_DISABLE_CACHE", "").lower() in {
+        "1",
+        "true",
+        "yes",
+    }:
+        return None
+    configured = os.environ.get("REPO_GARDENER_CACHE_DIR")
+    if configured:
+        return Path(configured).expanduser() / "parse-v1"
+    if os.name == "nt" and os.environ.get("LOCALAPPDATA"):
+        return Path(os.environ["LOCALAPPDATA"]) / "repo-gardener" / "cache" / "parse-v1"
+    xdg_cache = os.environ.get("XDG_CACHE_HOME")
+    base = Path(xdg_cache).expanduser() if xdg_cache else Path.home() / ".cache"
+    return base / "repo-gardener" / "parse-v1"
+
+
+def _read_parse_cache(
+    cache_key: str,
+    path: Path,
+    relative_path: str,
+    module: str,
+    category: str,
+    module_aliases: tuple[str, ...],
+    source: str,
+) -> FileRecord | None:
+    root = _parse_cache_root()
+    if root is None:
+        return None
+    try:
+        payload = _cached_payload(root, cache_key)
+        if not isinstance(payload, dict) or payload.get("schema") != PARSE_CACHE_SCHEMA:
+            return None
+        tree = ast.parse(source, filename=relative_path)
+        imports = tuple(payload["imports"])
+        symbols = tuple(payload["symbol_details"])
+        if not all(isinstance(item, dict) for item in (*imports, *symbols)):
+            return None
+        record = FileRecord(
+            path=path,
+            relative_path=relative_path,
+            module=module,
+            category=category,
+            source=source,
+            module_aliases=module_aliases,
+            mtime=path.stat().st_mtime,
+            tree=tree,
+            imports=[
+                ImportRef(
+                    module=str(item["module"]),
+                    names=tuple(str(name) for name in item.get("names", [])),
+                    conditional=bool(item.get("conditional", False)),
+                    type_checking=bool(item.get("type_checking", False)),
+                )
+                for item in imports
+            ],
+            symbol_details=tuple(SymbolRecord(**item) for item in symbols),
+            exported_symbols=set(map(str, payload["exported_symbols"])),
+            dynamic_refs=set(map(str, payload["dynamic_refs"])),
+            runtime_string_refs=set(map(str, payload["runtime_string_refs"])),
+            opaque_dynamic_discovery=bool(payload["opaque_dynamic_discovery"]),
+            has_main_guard=bool(payload["has_main_guard"]),
+            framework_entrypoints=tuple(map(str, payload["framework_entrypoints"])),
+            declares_public_api=bool(payload["declares_public_api"]),
+            vocabulary=set(map(str, payload["vocabulary"])),
+            parse_cache_hit=True,
+        )
+        record.symbols = {symbol.name for symbol in record.symbol_details}
+        return record
+    except (
+        OSError,
+        sqlite3.Error,
+        json.JSONDecodeError,
+        KeyError,
+        TypeError,
+        ValueError,
+        SyntaxError,
+    ):
+        return None
+
+
+def _write_parse_cache(cache_key: str, record: FileRecord) -> None:
+    if record.parse_error:
+        return
+    root = _parse_cache_root()
+    if root is None:
+        return
+    payload = {
+        "schema": PARSE_CACHE_SCHEMA,
+        "imports": [asdict(item) for item in record.imports],
+        "symbol_details": [asdict(item) for item in record.symbol_details],
+        "exported_symbols": sorted(record.exported_symbols),
+        "dynamic_refs": sorted(record.dynamic_refs),
+        "runtime_string_refs": sorted(record.runtime_string_refs),
+        "opaque_dynamic_discovery": record.opaque_dynamic_discovery,
+        "has_main_guard": record.has_main_guard,
+        "framework_entrypoints": list(record.framework_entrypoints),
+        "declares_public_api": record.declares_public_api,
+        "vocabulary": sorted(record.vocabulary),
+    }
+    with _CACHE_LOCK:
+        _CACHE_MEMORY[(root, cache_key)] = payload
+        _CACHE_DIRTY.add((root, cache_key))
+
+
+def _cached_payload(root: Path, cache_key: str) -> dict[str, object] | None:
+    identity = (root, cache_key)
+    with _CACHE_LOCK:
+        if identity in _CACHE_MEMORY:
+            return _CACHE_MEMORY[identity]
+        connection = _cache_connection(root)
+        row = connection.execute(
+            "SELECT payload FROM parse_records WHERE cache_key = ?", (cache_key,)
+        ).fetchone()
+        if row is None:
+            return None
+        payload = json.loads(row[0])
+        if isinstance(payload, dict):
+            _CACHE_MEMORY[identity] = payload
+            return payload
+    return None
+
+
+def _cache_connection(root: Path) -> sqlite3.Connection:
+    connection = _CACHE_CONNECTIONS.get(root)
+    if connection is not None:
+        return connection
+    root.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(root / "records.sqlite3", check_same_thread=False)
+    connection.execute(
+        "CREATE TABLE IF NOT EXISTS parse_records ("
+        "cache_key TEXT PRIMARY KEY, payload TEXT NOT NULL)"
+    )
+    _CACHE_CONNECTIONS[root] = connection
+    return connection
+
+
+def flush_parse_cache() -> None:
+    """Persist pending records in one transaction."""
+    with _CACHE_LOCK:
+        roots = {root for root, _ in _CACHE_DIRTY}
+        for root in roots:
+            connection = _CACHE_CONNECTIONS.get(root)
+            try:
+                connection = connection or _cache_connection(root)
+                rows = [
+                    (
+                        key,
+                        json.dumps(
+                            _CACHE_MEMORY[(root, key)],
+                            ensure_ascii=False,
+                            sort_keys=True,
+                        ),
+                    )
+                    for dirty_root, key in _CACHE_DIRTY
+                    if dirty_root == root
+                ]
+                if rows:
+                    connection.executemany(
+                        "INSERT OR REPLACE INTO parse_records(cache_key, payload) "
+                        "VALUES (?, ?)",
+                        rows,
+                    )
+                    connection.commit()
+            except (OSError, sqlite3.Error):
+                pass
+        _CACHE_DIRTY.clear()
+        _CACHE_MEMORY.clear()
+
+
+def _close_parse_cache() -> None:
+    flush_parse_cache()
+    with _CACHE_LOCK:
+        for connection in _CACHE_CONNECTIONS.values():
+            connection.close()
+        _CACHE_CONNECTIONS.clear()
+
+
+atexit.register(_close_parse_cache)
 
 
 def structural_tokens(source: str) -> tuple[str, ...]:
@@ -192,6 +430,7 @@ def _has_main_guard(tree: ast.Module) -> bool:
 
 def _framework_entrypoints(tree: ast.Module, relative_path: str) -> tuple[str, ...]:
     frameworks: set[str] = set()
+    bindings = _import_bindings(tree)
     constructors = {
         "FastAPI": "fastapi",
         "fastapi.FastAPI": "fastapi",
@@ -202,17 +441,69 @@ def _framework_entrypoints(tree: ast.Module, relative_path: str) -> tuple[str, .
     }
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
-            framework = constructors.get(dotted_name(node.func))
+            framework = constructors.get(_canonical_dotted(node.func, bindings))
             if framework:
                 frameworks.add(framework)
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            decorators = {_decorator_name(item) for item in node.decorator_list}
+            decorators = {
+                _canonical_dotted(
+                    item.func if isinstance(item, ast.Call) else item, bindings
+                )
+                for item in node.decorator_list
+            }
             if any(name in {"click.command", "click.group"} for name in decorators):
                 frameworks.add("click")
     name = Path(relative_path).name.lower()
     if name in {"asgi.py", "settings.py", "urls.py", "wsgi.py"}:
         frameworks.add("django")
     return tuple(sorted(frameworks))
+
+
+def _import_bindings(tree: ast.Module) -> dict[str, str]:
+    bindings: dict[str, str] = {}
+    for node in tree.body:
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                local = alias.asname or alias.name.split(".", 1)[0]
+                bindings[local] = alias.name if alias.asname else local
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            for alias in node.names:
+                if alias.name != "*":
+                    bindings[alias.asname or alias.name] = f"{node.module}.{alias.name}"
+
+    # Follow simple constructor aliases such as ``API = FastAPI``.  This is
+    # intentionally bounded to plain names; it does not attempt full data flow.
+    for _ in range(max(1, len(tree.body))):
+        changed = False
+        for node in tree.body:
+            if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+                continue
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            value = node.value
+            if not isinstance(value, (ast.Name, ast.Attribute)):
+                continue
+            canonical = _canonical_dotted(value, bindings)
+            if not canonical:
+                continue
+            for target in targets:
+                if (
+                    isinstance(target, ast.Name)
+                    and bindings.get(target.id) != canonical
+                ):
+                    bindings[target.id] = canonical
+                    changed = True
+        if not changed:
+            break
+    return bindings
+
+
+def _canonical_dotted(node: ast.AST, bindings: dict[str, str]) -> str:
+    name = dotted_name(node)
+    if not name:
+        return ""
+    head, separator, tail = name.partition(".")
+    canonical = bindings.get(head, head)
+    return f"{canonical}.{tail}" if separator else canonical
 
 
 def _declares_public_api(tree: ast.Module) -> bool:
@@ -489,6 +780,7 @@ def _style_metrics(tree: ast.Module, source: str) -> StyleMetrics:
         )
         for node in calls
     )
+    logging_call_nodes = [node for node in calls if _is_logging_call(node)]
     comprehensions = sum(
         isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp))
         for node in ast.walk(tree)
@@ -569,6 +861,30 @@ def _style_metrics(tree: ast.Module, source: str) -> StyleMetrics:
             bool(SNAKE_CASE_RE.fullmatch(node.name)) for node in functions
         ),
         function_name_words=sum(_name_word_count(node.name) for node in functions),
+        defensive_guards=sum(_is_defensive_guard(node) for node in ast.walk(tree)),
+        single_use_tiny_helpers=sum(
+            (node.end_lineno or node.lineno) - node.lineno + 1 <= 6
+            and _loaded_name_count(tree, node.name) <= 1
+            for node in top_level_functions
+        ),
+        wrapper_functions=sum(_is_wrapper_function(node) for node in functions),
+        log_then_reraise_handlers=sum(
+            _logs_then_reraises(node)
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ExceptHandler)
+        ),
+        redundant_temp_returns=_redundant_temp_returns(tree),
+        mapping_get_calls=sum(
+            isinstance(node.func, ast.Attribute) and node.func.attr == "get"
+            for node in calls
+        ),
+        narration_logging_calls=sum(
+            bool(node.args)
+            and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[0].value, str)
+            and node.args[0].value.strip().lower().startswith(NARRATION_PREFIXES)
+            for node in logging_call_nodes
+        ),
     )
 
 
@@ -628,3 +944,86 @@ def _function_complexity(node: ast.FunctionDef | ast.AsyncFunctionDef) -> int:
 def _name_word_count(name: str) -> int:
     expanded = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name.strip("_"))
     return max(1, len([part for part in expanded.split("_") if part]))
+
+
+def _is_logging_call(node: ast.Call) -> bool:
+    name = dotted_name(node.func)
+    return name.startswith("logging.") or (
+        isinstance(node.func, ast.Attribute)
+        and node.func.attr
+        in {"debug", "info", "warning", "error", "exception", "critical"}
+        and dotted_name(node.func.value).lower() in {"log", "logger"}
+    )
+
+
+def _is_defensive_guard(node: ast.AST) -> bool:
+    if not isinstance(node, (ast.If, ast.While, ast.Assert)):
+        return False
+    test = node.test
+    if not isinstance(test, ast.BoolOp) or not isinstance(test.op, ast.And):
+        return False
+    checks = list(test.values)
+    if len(checks) < 3:
+        return False
+    return any(
+        isinstance(child, ast.Constant)
+        and child.value in {None, ""}
+        or isinstance(child, ast.Call)
+        and dotted_name(child.func) == "len"
+        for check in checks
+        for child in ast.walk(check)
+    )
+
+
+def _loaded_name_count(tree: ast.Module, name: str) -> int:
+    return sum(
+        isinstance(node, ast.Name)
+        and isinstance(node.ctx, ast.Load)
+        and node.id == name
+        for node in ast.walk(tree)
+    )
+
+
+def _is_wrapper_function(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    body = list(node.body)
+    if (
+        body
+        and isinstance(body[0], ast.Expr)
+        and isinstance(body[0].value, ast.Constant)
+        and isinstance(body[0].value.value, str)
+    ):
+        body = body[1:]
+    if len(body) != 1 or not isinstance(body[0], ast.Return):
+        return False
+    value = body[0].value
+    return isinstance(value, ast.Call) or (
+        isinstance(value, ast.Await) and isinstance(value.value, ast.Call)
+    )
+
+
+def _logs_then_reraises(node: ast.ExceptHandler) -> bool:
+    return any(
+        isinstance(child, ast.Raise) and child.exc is None for child in ast.walk(node)
+    ) and any(
+        isinstance(child, ast.Call) and _is_logging_call(child)
+        for child in ast.walk(node)
+    )
+
+
+def _redundant_temp_returns(tree: ast.Module) -> int:
+    count = 0
+    for node in ast.walk(tree):
+        for _, value in ast.iter_fields(node):
+            if not isinstance(value, list):
+                continue
+            for previous, current in pairwise(value):
+                if (
+                    isinstance(previous, ast.Assign)
+                    and len(previous.targets) == 1
+                    and isinstance(previous.targets[0], ast.Name)
+                    and isinstance(current, ast.Return)
+                    and isinstance(current.value, ast.Name)
+                    and current.value.id == previous.targets[0].id
+                ):
+                    count += 1
+    return count

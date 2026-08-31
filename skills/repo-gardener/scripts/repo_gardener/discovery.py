@@ -76,59 +76,75 @@ def _git_files(root: Path) -> list[Path] | None:
 
 def _walk_files(root: Path) -> list[Path]:
     found: list[Path] = []
-    ignore_patterns = _ignore_patterns(root)
+    ignore_rules = _ignore_patterns(root)
     for current, directories, files in os.walk(root):
         current_path = Path(current)
         kept_directories = []
         for directory in directories:
-            candidate = current_path / directory
-            relative = candidate.relative_to(root).as_posix()
-            if directory in IGNORED_DIRECTORIES or matches_any(
-                relative + "/", ignore_patterns
-            ):
+            if directory in IGNORED_DIRECTORIES:
                 continue
             kept_directories.append(directory)
         directories[:] = sorted(kept_directories)
         found.extend(
             current_path / name
             for name in sorted(files)
-            if not matches_any(
-                (current_path / name).relative_to(root).as_posix(), ignore_patterns
+            if not _is_ignored(
+                (current_path / name).relative_to(root).as_posix(), ignore_rules
             )
         )
     return found
 
 
-def _ignore_patterns(root: Path) -> list[str]:
+def _ignore_patterns(root: Path) -> list[tuple[str, bool]]:
     path = root / ".gitignore"
     if not path.is_file():
         return []
-    patterns: list[str] = []
+    patterns: list[tuple[str, bool]] = []
     for raw_line in path.read_text(encoding="utf-8", errors="replace").splitlines():
         line = raw_line.strip()
-        if not line or line.startswith(("#", "!")):
+        if not line or line.startswith("#"):
             continue
-        patterns.append(line.rstrip("/"))
+        negated = line.startswith("!")
+        if negated:
+            line = line[1:].strip()
+        if not line:
+            continue
+        line = line.lstrip("/")
         if line.endswith("/"):
-            patterns.append(line.rstrip("/") + "/**")
+            line = line.rstrip("/") + "/**"
+        patterns.append((line, negated))
     return patterns
 
 
-def module_name(root: Path, path: Path) -> str:
-    return module_names(root, path)[0]
+def _is_ignored(relative_path: str, rules: list[tuple[str, bool]]) -> bool:
+    ignored = False
+    for pattern, negated in rules:
+        if matches_any(relative_path, [pattern]):
+            ignored = not negated
+    return ignored
 
 
-def module_names(root: Path, path: Path) -> tuple[str, ...]:
+def module_name(root: Path, path: Path, import_roots: tuple[str, ...] = ()) -> str:
+    return module_names(root, path, import_roots)[0]
+
+
+def module_names(
+    root: Path, path: Path, import_roots: tuple[str, ...] = ()
+) -> tuple[str, ...]:
     relative = path.relative_to(root)
     literal_parts = list(relative.with_suffix("").parts)
     if literal_parts and literal_parts[-1] == "__init__":
         literal_parts = literal_parts[:-1]
     literal = ".".join(literal_parts)
-    installed_parts = list(literal_parts)
-    if installed_parts and installed_parts[0] in {"src", "lib"}:
-        installed_parts = installed_parts[1:]
-    installed = ".".join(installed_parts)
-    names = tuple(dict.fromkeys(name for name in (installed, literal) if name))
+    roots = {"src", "lib", *import_roots}
+    installed_names: list[str] = []
+    for source_root in sorted(
+        roots, key=lambda value: (-len(Path(value).parts), value)
+    ):
+        root_parts = Path(source_root).parts
+        if root_parts and tuple(literal_parts[: len(root_parts)]) == root_parts:
+            installed_names.append(".".join(literal_parts[len(root_parts) :]))
+    names = tuple(dict.fromkeys(name for name in (*installed_names, literal) if name))
     return names or ("",)
 
 
