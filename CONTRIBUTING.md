@@ -19,6 +19,20 @@ Repo Gardener optimizes for explainability and false-positive control. A new rul
 
 Finding schema changes require an explicit `schema_version` decision and updated tests.
 
+## Documentation and translations
+
+`README.md` is the authoritative English landing page. The complete public
+translations are `README.zh-TW.md`, `README.zh-CN.md`, and `README.ja.md`.
+When a pull request changes installation commands, supported hosts, release
+status, safety boundaries, benchmark numbers, or links, update all four files
+in the same pull request. Keep commands, version numbers, paths, and measured
+results identical across languages; translate the explanation, not the
+contract.
+
+The README hero is the source-controlled `docs/hero.svg`. Keep it accessible,
+self-contained, and renderable by GitHub without external fonts, scripts, or
+assets. Avoid replacing measured claims with unqualified marketing claims.
+
 ## Security-sensitive changes
 
 Changes to deletion eligibility, runtime references, parsing, validation,
