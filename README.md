@@ -1,5 +1,8 @@
 # AI Repo Gardener
 
+[![CI](https://github.com/niansia/ai-repo-gardener/actions/workflows/ci.yml/badge.svg)](https://github.com/niansia/ai-repo-gardener/actions/workflows/ci.yml)
+[![GitHub prerelease](https://img.shields.io/github/v/release/niansia/ai-repo-gardener?include_prereleases&label=release)](https://github.com/niansia/ai-repo-gardener/releases/tag/v0.1.0-alpha.7)
+
 **Find files the AI forgot to delete.**
 
 AI Repo Gardener is a deterministic garbage collector for AI-edited Python
@@ -73,10 +76,14 @@ Python 3.11 through 3.14. Platform support is claimed from hosted runs, not
 inferred from a single local machine.
 
 ```bash
-python -m pip install .
+python -m pip install "https://github.com/niansia/ai-repo-gardener/releases/download/v0.1.0-alpha.7/repo_gardener-0.1.0a7-py3-none-any.whl"
+repo-gardener --version
 repo-gardener diff /path/to/project --base HEAD~1
 repo-gardener fix /path/to/project --base HEAD~1 --dry-run
 ```
+
+To install from source instead, clone the repository and run
+`python -m pip install .` from its root.
 
 Applying a deletion requires the exact JSON plan that was reviewed:
 
