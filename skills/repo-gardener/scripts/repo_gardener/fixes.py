@@ -49,7 +49,7 @@ def apply_deletions(
         )
     if not isfinite(validation_timeout) or validation_timeout <= 0:
         raise FixError("validation timeout must be greater than zero")
-    _state_root(root)
+    _preflight_state_paths(root)
     files = [_safe_target(root, finding.path) for finding in findings]
     if any(path.is_symlink() for path in files):
         raise FixError("refusing to delete symlink candidates")
@@ -302,13 +302,18 @@ def _safe_state_path(root: Path, relative_path: str | Path) -> Path:
     return target
 
 
-def _create_snapshot(root: Path, operation_id: str) -> tuple[Path, Path]:
-    state_root = _state_root(root)
-    state_root.mkdir(exist_ok=True)
+def _preflight_state_paths(root: Path) -> tuple[Path, Path]:
     state_root = _state_root(root)
     rollback_root = _safe_state_path(root, "rollback")
     if rollback_root.exists() and not rollback_root.is_dir():
         raise FixError("rollback state path is not a directory: rollback")
+    return state_root, rollback_root
+
+
+def _create_snapshot(root: Path, operation_id: str) -> tuple[Path, Path]:
+    state_root, rollback_root = _preflight_state_paths(root)
+    state_root.mkdir(exist_ok=True)
+    state_root, rollback_root = _preflight_state_paths(root)
     rollback_root.mkdir(exist_ok=True)
     snapshot = _safe_state_path(root, Path("rollback") / operation_id)
     return state_root, snapshot

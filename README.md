@@ -4,7 +4,7 @@
 
 AI Repo Gardener is a deterministic garbage collector for AI-edited Python
 repositories. The package, CLI, and portable Skill keep the concise
-`repo-gardener` identifier. Version `0.1.0a4` focuses on one job: finding
+`repo-gardener` identifier. Version `0.1.0a5` focuses on one job: finding
 superseded iteration files and newly-created orphan files without turning weak
 guesses into deletions.
 
