@@ -5,10 +5,12 @@ from typing import Any
 
 from .models import Finding, Report
 
+CONFIDENCE_FLOORS = {"high": 0.85, "medium": 0.65, "all": 0.0}
+
 
 def filtered_report(report: Report, confidence: str) -> dict[str, Any]:
     data = report.to_dict()
-    minimum = {"high": 0.85, "medium": 0.65, "all": 0.0}[confidence]
+    minimum = CONFIDENCE_FLOORS[confidence]
     data["findings"] = [
         item for item in data["findings"] if item["confidence"] >= minimum
     ]
@@ -36,6 +38,21 @@ def render_pretty(report: Report, confidence: str) -> str:
         lines.append(
             f"Iteration base: {report.base}  Changed files: {data['metrics'].get('changed_files', 0)}"
         )
+    accepted = data["metrics"].get("accepted_findings")
+    if isinstance(accepted, dict):
+        unmatched = accepted.get("unmatched", [])
+        lines.append(
+            f"Accepted ledger: {accepted.get('source', '')}  "
+            f"entries {accepted.get('entries', 0)}  "
+            f"suppressed {accepted.get('suppressed', 0)}  "
+            f"unmatched {len(unmatched) if isinstance(unmatched, list) else 0}"
+        )
+        if isinstance(unmatched, list) and unmatched:
+            lines.append(
+                "Accepted entries no longer reproduced by this run: "
+                + ", ".join(str(item) for item in unmatched[:3])
+                + ". Re-run accept to prune them."
+            )
     structure = data["metrics"].get("structure_entropy")
     if isinstance(structure, dict):
         lines.append(f"Structure entropy: {structure.get('score', 0):.1f}/100")

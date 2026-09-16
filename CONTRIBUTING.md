@@ -8,7 +8,9 @@ Repo Gardener optimizes for explainability and false-positive control. A new rul
 2. Include a false-positive case for dynamic imports, public APIs, framework discovery, or other relevant risks.
 3. Keep analysis deterministic and local. An optional model may review ambiguity later, but it cannot be the source of deletion confidence.
 4. Keep architecture and style actions proposal-only.
-5. Run:
+5. Record user-visible behavior in [CHANGELOG.md](CHANGELOG.md) under the
+   unreleased heading.
+6. Run:
 
    ```bash
    ruff check .
@@ -17,7 +19,9 @@ Repo Gardener optimizes for explainability and false-positive control. A new rul
    python skills/repo-gardener/scripts/run_repo_gardener.py scan . --confidence all
    ```
 
-Finding schema changes require an explicit `schema_version` decision and updated tests.
+Finding schema changes require an explicit `schema_version` decision and updated
+tests. That includes the finding JSON contract, the reviewed-plan schema, the
+accepted-findings ledger schema, and the SARIF mapping.
 
 ## Documentation and translations
 

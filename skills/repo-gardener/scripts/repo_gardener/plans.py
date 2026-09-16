@@ -9,9 +9,10 @@ from typing import Any
 from .config import Config
 from .fixes import FixError
 from .git_support import resolve_git_ref
+from .ledger import AcceptedLedger, ledger_digest
 from .models import Finding
 
-PLAN_SCHEMA_VERSION = 2
+PLAN_SCHEMA_VERSION = 3
 MAX_PLAN_BYTES = 2 * 1024 * 1024
 
 
@@ -22,6 +23,7 @@ def build_plan(
     config: Config,
     apply: bool = False,
     blockers: list[str] | None = None,
+    accepted: AcceptedLedger | None = None,
 ) -> dict[str, Any]:
     base_sha = resolve_git_ref(root, base_ref)
     head_sha = resolve_git_ref(root, "HEAD")
@@ -38,6 +40,7 @@ def build_plan(
         "base_sha": base_sha,
         "head_sha": head_sha,
         "config_sha256": _config_hash(config),
+        "accepted_sha256": ledger_digest(accepted),
         "validation_required": True,
         "automatic_deletion_blockers": sorted(blockers or []),
         "operations": operations,
@@ -109,6 +112,7 @@ def _validate_plan(plan: dict[str, Any]) -> None:
         "base_sha",
         "head_sha",
         "config_sha256",
+        "accepted_sha256",
         "validation_required",
         "automatic_deletion_blockers",
         "operations",
@@ -169,6 +173,7 @@ def _plan_id(plan: dict[str, Any]) -> str:
             "base_sha",
             "head_sha",
             "config_sha256",
+            "accepted_sha256",
             "automatic_deletion_blockers",
             "operations",
         )

@@ -31,6 +31,50 @@ jobs:
         run: pytest
       - name: Dogfood
         run: repo-gardener scan . --confidence high --fail-on high
+      - name: Dogfood the accepted-findings ledger and SARIF output
+        shell: bash
+        run: |
+          repo-gardener accept . --output accepted-dogfood.json --confidence all
+          repo-gardener scan . --confidence all --accepted accepted-dogfood.json --fail-on any
+          repo-gardener scan . --confidence all --format sarif > dogfood.sarif
+          python -m repo_gardener.sarif_summary dogfood.sarif
+
+  action:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+      - name: Run the reusable action against this repository
+        id: gardener
+        uses: ./
+        with:
+          path: .
+          confidence: high
+          fail-on: high
+          sarif-file: repo-gardener.sarif
+      - name: Validate the SARIF contract and action outputs
+        env:
+          SARIF: ${{ steps.gardener.outputs.sarif-file }}
+          FINDINGS: ${{ steps.gardener.outputs.findings }}
+          EXIT_CODE: ${{ steps.gardener.outputs.exit-code }}
+        run: |
+          test "$EXIT_CODE" = "0"
+          python - "$SARIF" "$FINDINGS" <<'PY'
+          import json
+          import sys
+
+          document = json.loads(open(sys.argv[1], encoding="utf-8").read())
+          run = document["runs"][0]
+          rules = run["tool"]["driver"]["rules"]
+          assert document["version"] == "2.1.0", document["version"]
+          assert len(run["results"]) == int(sys.argv[2]), "findings output mismatch"
+          for result in run["results"]:
+              assert rules[result["ruleIndex"]]["id"] == result["ruleId"]
+              assert result["partialFingerprints"]["repoGardenerFindingId/v1"]
+          print(f"SARIF contract ok: {len(run['results'])} result(s)")
+          PY
 
   skill-spec:
     runs-on: ubuntu-latest

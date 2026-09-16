@@ -8,8 +8,25 @@ from pathlib import Path
 from . import __version__
 from .analysis import Analyzer
 from .fixes import FixError, apply_deletions, restore_last, safe_candidates
+from .ledger import (
+    DEFAULT_LEDGER_NAME,
+    AcceptedLedger,
+    LedgerError,
+    build_ledger,
+    ledger_metrics,
+    load_ledger,
+    partition_findings,
+    unmatched_entries,
+)
 from .plans import build_plan, load_reviewed_plan, require_matching_plan
-from .reporting import render_fix_json, render_fix_plan, render_json, render_pretty
+from .reporting import (
+    CONFIDENCE_FLOORS,
+    render_fix_json,
+    render_fix_plan,
+    render_json,
+    render_pretty,
+)
+from .sarif import render_sarif
 from .skill_bundle import bundled_skill_path
 
 
@@ -65,11 +82,42 @@ def build_parser() -> argparse.ArgumentParser:
                 help="Pre-AI style baseline commit or date (for example 2026-01-15)",
             )
 
+    accept = subparsers.add_parser(
+        "accept",
+        help="Record current findings as a reviewed accepted-findings ledger",
+    )
+    accept.add_argument("path", nargs="?", default=".", help="Repository root")
+    accept.add_argument("--config", type=Path, help="Config file path")
+    accept.add_argument(
+        "--confidence", choices=("high", "medium", "all"), default="all"
+    )
+    accept.add_argument(
+        "--base", help="Git ref that predates the agent iteration; adds Git evidence"
+    )
+    accept.add_argument(
+        "--experimental",
+        action="store_true",
+        help="Also accept review-only structure and style findings",
+    )
+    accept.add_argument("--baseline", help="Pre-AI style baseline commit or date")
+    accept.add_argument(
+        "--output",
+        type=Path,
+        metavar="FILE",
+        help=f"Ledger path (default: <repository>/{DEFAULT_LEDGER_NAME})",
+    )
+
     fix = subparsers.add_parser(
         "fix", help="Preview, apply, or restore safe stale-file deletions"
     )
     fix.add_argument("path", nargs="?", default=".", help="Repository root")
     fix.add_argument("--config", type=Path, help="Config file path")
+    fix.add_argument(
+        "--accepted",
+        type=Path,
+        metavar="FILE",
+        help="Accepted-findings ledger; accepted findings are never deleted",
+    )
     fix.add_argument(
         "--base",
         help="Git ref that predates the agent iteration (defaults to HEAD)",
@@ -122,9 +170,20 @@ def build_parser() -> argparse.ArgumentParser:
 def _analysis_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("path", nargs="?", default=".", help="Repository root")
     parser.add_argument("--config", type=Path, help="Config file path")
-    parser.add_argument("--format", choices=("pretty", "json"), default="pretty")
+    parser.add_argument(
+        "--format", choices=("pretty", "json", "sarif"), default="pretty"
+    )
     parser.add_argument(
         "--confidence", choices=("high", "medium", "all"), default="medium"
+    )
+    parser.add_argument(
+        "--accepted",
+        type=Path,
+        metavar="FILE",
+        help=(
+            "Accepted-findings ledger written by the accept command; listed "
+            "findings are suppressed and cannot reach --fail-on"
+        ),
     )
     parser.add_argument(
         "--fail-on",
@@ -149,12 +208,55 @@ def main(argv: list[str] | None = None) -> int:
             return _error("--plan cannot be combined with --restore")
         return _run_restore(root)
     try:
+        ledger = _load_accepted(getattr(args, "accepted", None))
+    except LedgerError as exc:
+        return _error(str(exc))
+    try:
         analyzer = Analyzer(root, args.config)
     except (OSError, ValueError) as exc:
         return _error(f"unable to analyze repository: {exc}")
+    if args.command == "accept":
+        return _run_accept(analyzer, root, args)
     if args.command == "fix":
-        return _run_fix(analyzer, root, args)
-    return _run_analysis(analyzer, args)
+        return _run_fix(analyzer, root, args, ledger)
+    return _run_analysis(analyzer, args, ledger)
+
+
+def _load_accepted(path: Path | None) -> AcceptedLedger | None:
+    return load_ledger(path) if path is not None else None
+
+
+def _run_accept(analyzer: Analyzer, root: Path, args: argparse.Namespace) -> int:
+    if args.baseline and not args.experimental:
+        return _error("--baseline requires --experimental on scan, diff, or accept")
+    output = args.output or root / DEFAULT_LEDGER_NAME
+    try:
+        previous = load_ledger(output) if output.is_file() else None
+    except LedgerError as exc:
+        return _error(f"{exc}; repair or remove that file before rewriting it")
+    try:
+        report = analyzer.report("scan", args.base, args.experimental, args.baseline)
+    except ValueError as exc:
+        return _error(str(exc))
+    minimum = CONFIDENCE_FLOORS[args.confidence]
+    accepted = [finding for finding in report.findings if finding.confidence >= minimum]
+    ledger = build_ledger(accepted, previous, output.as_posix())
+    try:
+        output.write_text(ledger.to_json(), encoding="utf-8")
+    except OSError as exc:
+        return _error(f"unable to write accepted-findings ledger {output}: {exc}")
+    dropped = len((previous.ids if previous else frozenset()) - ledger.ids)
+    carried = sum(1 for entry in ledger.entries if entry.note)
+    print(
+        f"Accepted {len(ledger.entries)} finding(s) at confidence "
+        f"{args.confidence} -> {output}"
+    )
+    print(f"Carried notes: {carried}  Dropped entries: {dropped}")
+    print(
+        "Review and commit this ledger. Accepted findings are hidden from later "
+        "runs that pass --accepted and can never be deleted by fix."
+    )
+    return 0
 
 
 def _run_restore(root: Path) -> int:
@@ -169,7 +271,12 @@ def _run_restore(root: Path) -> int:
     return 0
 
 
-def _run_fix(analyzer: Analyzer, root: Path, args: argparse.Namespace) -> int:
+def _run_fix(
+    analyzer: Analyzer,
+    root: Path,
+    args: argparse.Namespace,
+    ledger: AcceptedLedger | None,
+) -> int:
     if args.plan and not args.apply:
         return _error("--plan is only valid with --apply")
     if args.apply and not args.plan:
@@ -181,7 +288,9 @@ def _run_fix(analyzer: Analyzer, root: Path, args: argparse.Namespace) -> int:
     base = args.base or (str(reviewed["base_ref"]) if reviewed else "HEAD")
     try:
         report = analyzer.report("stale", base)
-        candidates = safe_candidates(report.findings)
+        candidates, accepted = partition_findings(
+            safe_candidates(report.findings), ledger
+        )
         blockers = _automatic_deletion_blockers(analyzer)
         plan = build_plan(
             root,
@@ -190,6 +299,7 @@ def _run_fix(analyzer: Analyzer, root: Path, args: argparse.Namespace) -> int:
             analyzer.config,
             args.apply,
             blockers,
+            ledger,
         )
         if reviewed:
             require_matching_plan(reviewed, plan)
@@ -205,6 +315,11 @@ def _run_fix(analyzer: Analyzer, root: Path, args: argparse.Namespace) -> int:
                 blockers,
             )
         )
+        if accepted:
+            print(
+                f"\nWithheld {len(accepted)} accepted finding(s) from deletion: "
+                + ", ".join(finding.path for finding in accepted)
+            )
         if analyzer.config.validation_commands and not args.trust_repo_config:
             print(
                 "\nRepository-configured validation commands are ignored unless "
@@ -239,7 +354,11 @@ def _run_fix(analyzer: Analyzer, root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
-def _run_analysis(analyzer: Analyzer, args: argparse.Namespace) -> int:
+def _run_analysis(
+    analyzer: Analyzer,
+    args: argparse.Namespace,
+    ledger: AcceptedLedger | None,
+) -> int:
     if (
         getattr(args, "baseline", None)
         and args.command in {"scan", "diff"}
@@ -255,11 +374,16 @@ def _run_analysis(analyzer: Analyzer, args: argparse.Namespace) -> int:
         )
     except ValueError as exc:
         return _error(str(exc))
-    output = (
-        render_json(report, args.confidence)
-        if args.format == "json"
-        else render_pretty(report, args.confidence)
-    )
+    if ledger is not None:
+        remaining, suppressed = partition_findings(report.findings, ledger)
+        report.metrics["accepted_findings"] = ledger_metrics(
+            ledger,
+            len(suppressed),
+            unmatched_entries(ledger, report.findings),
+        )
+        report.findings = remaining
+    renderers = {"json": render_json, "sarif": render_sarif, "pretty": render_pretty}
+    output = renderers[args.format](report, args.confidence)
     print(output)
     minimum = {"high": 0.85, "medium": 0.65, "any": 0.0}.get(args.fail_on)
     return (

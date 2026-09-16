@@ -475,7 +475,7 @@ def test_fix_uses_the_same_git_base_as_diff(tmp_path: Path, capsys) -> None:
     )
     payload = json.loads(capsys.readouterr().out)
     assert exit_code == 0
-    assert payload["schema_version"] == 2
+    assert payload["schema_version"] == 3
     assert payload["plan_id"]
     assert payload["automatic_deletion_blockers"] == []
     assert payload["operations"][0]["candidate_sha256"]
@@ -483,6 +483,7 @@ def test_fix_uses_the_same_git_base_as_diff(tmp_path: Path, capsys) -> None:
     assert payload["base_sha"]
     assert payload["head_sha"]
     assert payload["config_sha256"]
+    assert payload["accepted_sha256"]
     plan_path = tmp_path / "reviewed-plan.json"
     plan_path.write_text(json.dumps(payload), encoding="utf-8")
 

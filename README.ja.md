@@ -11,7 +11,7 @@
   <a href="https://github.com/niansia/ai-repo-gardener/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/niansia/ai-repo-gardener/actions/workflows/ci.yml/badge.svg"></a>
   <a href="https://pypi.org/project/repo-gardener/"><img alt="PyPI" src="https://img.shields.io/pypi/v/repo-gardener?include_prereleases"></a>
   <a href="https://pypi.org/project/repo-gardener/"><img alt="Python 3.11–3.14" src="https://img.shields.io/pypi/pyversions/repo-gardener"></a>
-  <a href="https://github.com/niansia/ai-repo-gardener/releases/tag/v0.1.0-alpha.11"><img alt="GitHub prerelease" src="https://img.shields.io/github/v/release/niansia/ai-repo-gardener?include_prereleases&label=release"></a>
+  <a href="https://github.com/niansia/ai-repo-gardener/releases/tag/v0.1.0-alpha.12"><img alt="GitHub prerelease" src="https://img.shields.io/github/v/release/niansia/ai-repo-gardener?include_prereleases&label=release"></a>
 </p>
 
 AI Repo Gardener は、AI が編集した Python リポジトリ向けの決定論的な
@@ -20,7 +20,7 @@ helper、重複実装、残った依存関係、ディレクトリ構造の負�
 Python スタイルから外れたコードを検出します。モデルの呼び出しやソースコードの
 アップロードは行わず、弱い推測を削除操作に変えることもありません。
 
-> **リリース状況：** `0.1.0a11` は **v0.1** 系列の 11 番目の alpha です。
+> **リリース状況：** `0.1.0a12` は **v0.1** 系列の 12 番目の alpha です。
 > 安定版 `0.1.0` はまだリリースされていません。Repo GC が alpha の中核機能で、
 > architecture と house-style の分析は実験的かつレビュー専用です。
 
@@ -29,7 +29,7 @@ Python スタイルから外れたコードを検出します。モデルの呼�
 Python 3.11 以上が必要です。
 
 ```bash
-python -m pip install "repo-gardener==0.1.0a11"
+python -m pip install "repo-gardener==0.1.0a12"
 repo-gardener diff .
 repo-gardener fix . --dry-run
 ```
@@ -37,7 +37,7 @@ repo-gardener fix . --dry-run
 インストールせずに一度だけ実行することもできます。
 
 ```bash
-uvx --from "repo-gardener==0.1.0a11" repo-gardener diff .
+uvx --from "repo-gardener==0.1.0a12" repo-gardener diff .
 ```
 
 `diff` と `fix` はどちらも既定値が `--base HEAD` なので、レビューで確認した Git
@@ -67,7 +67,7 @@ PyPI wheel には完全なポータブル Skill が含まれています。ま�
 同梱 Skill のパスを取得します。
 
 ```bash
-python -m pip install "repo-gardener==0.1.0a11"
+python -m pip install "repo-gardener==0.1.0a12"
 repo-gardener skill-path
 ```
 
@@ -146,6 +146,7 @@ hash、evidence-file hash が固定されます。リポジトリが変わると
 | コマンド | 用途 | ファイルを変更するか |
 | --- | --- | --- |
 | `scan .` | 対応する Repo GC ルールを実行 | いいえ |
+| `accept .` | 現在の finding をレビュー済み accepted-findings ledger として記録 | ledger ファイルのみ |
 | `stale .` | ファイル、symbol、重複実装、依存関係レベルの GC に集中 | いいえ |
 | `diff . [--base <ref>]` | committed、staged、worktree、untracked の iteration を監査 | いいえ |
 | `fix . --dry-run` | 条件を満たす高信頼度の削除候補をプレビュー | いいえ |
@@ -157,9 +158,47 @@ hash、evidence-file hash が固定されます。リポジトリが変わると
 | `scan . --experimental` | 完全 scan に structure と style を追加 | いいえ |
 | `skill-path` | wheel に同梱されたポータブル Skill のパスを表示 | いいえ |
 
-すべてのレポートコマンドは agent と CI 向けの安定した JSON に対応しています。
-`--fail-on high`、`--fail-on medium`、`--fail-on any` は閾値に達すると exit code `1`、
-ツールまたは設定のエラーでは `2` を返します。
+すべてのレポートコマンドは agent と CI 向けの安定した JSON と SARIF 2.1.0 に対応し、
+いずれも `--accepted <ledger>` を受け付けます。`--fail-on high`、`--fail-on medium`、
+`--fail-on any` は閾値に達すると exit code `1`、ツールまたは設定のエラーでは `2` を
+返します。
+
+## CI できれいな状態を保つ
+
+既に残骸のあるリポジトリを一度で片付けることはできません。今日レビューした finding
+をいったん受け入れ、CI は「新しく増えたもの」だけで失敗させます。
+
+```bash
+repo-gardener accept .                     # repo-gardener-accepted.json を生成
+repo-gardener scan . --accepted repo-gardener-accepted.json --fail-on medium
+```
+
+各エントリは内容から導出された finding ID です。証拠が変われば一致しなくなり、その
+finding はレビューに戻ります。`accept` は ledger をソートして書き直し、レビュー者の
+`note` を引き継ぎ、再現しなくなったエントリを削除します。ledger が暗黙に読み込まれる
+ことはなく、削除候補を減らすことしかできず、レビュー済み plan には
+`accepted_sha256` として固定されます。
+
+このリポジトリ自体が再利用可能な action でもあります。
+
+```yaml
+- uses: niansia/ai-repo-gardener@v0.1.0-alpha.12
+  id: gardener
+  with:
+    command: diff
+    base: ${{ github.event.pull_request.base.sha }}
+    accepted: repo-gardener-accepted.json
+    fail-on: high
+- if: always()
+  uses: github/codeql-action/upload-sarif@v4
+  with:
+    sarif_file: ${{ steps.gardener.outputs.sarif-file }}
+```
+
+固定された commit をそのままインストールし、安定した fingerprint を持つ SARIF を出力
+（code scanning は同じアラートを追跡し、開き直しません）、Markdown のジョブサマリーを
+表示し、リポジトリを変更することはありません。`diff` が base commit を参照できるよう
+`fetch-depth: 0` で checkout してください。
 
 ## 雰囲気ではなく証拠
 
@@ -168,7 +207,7 @@ hash、evidence-file hash が固定されます。リポジトリが変わると
 
 | 公開 gate | 現在の結果 |
 | --- | --- |
-| Source suite | **182 tests** |
+| Source suite | **200 tests** |
 | 破壊的安全性の対抗ケース | **0 / 59 eligible-deletion false positives** |
 | Curated labeled corpus | **10 TP、0 FP、0 FN、10 TN**。この corpus 内の precision／recall は 100% |
 | Release wheel | 同一 wheel を **12 の OS/Python 組み合わせ**でテスト：Ubuntu、Windows、macOS × Python 3.11–3.14 |
@@ -193,6 +232,9 @@ AI Repo Gardener は意図的に保守的です。
   `app/`、`src/`、package、namespace package 内は、owner が 2 つの安全設定を明示的に
   変更しない限りレビュー専用です。
 - Architecture と style の finding がファイルを移動・削除することはありません。
+- accepted-findings ledger はレポートの抑制と削除候補の取り下げのみを行います。
+  confidence を上げる、保護パスを解除する、apply を許可することはなく、
+  `--accepted` で明示されたときにだけ読み込まれます。
 - runtime の外部依存は 0。モデルやネットワークを呼び出さず、ソースコードや
   telemetry を送信しません。
 
