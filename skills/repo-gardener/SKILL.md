@@ -64,7 +64,8 @@ these experimental analyzers into the default cleanup report.
 
 ## Mutation boundary
 
-Analysis is read-only. Before any deletion, read [references/safety-policy.md](references/safety-policy.md). Never run the experimental `fix --apply` unless the user asked for repository changes and the exact JSON plan has been reviewed; always pass that file through `--plan`. Review repository-provided safety overrides because they affect eligibility even without `--trust-repo-config`. Never pass `--trust-repo-config` unless the user explicitly authorizes execution of repository-controlled commands. High confidence means eligible for review, not permission to delete.
+Analysis is read-only. `accept` writes only the ledger file it was asked to
+write. Before any deletion, read [references/safety-policy.md](references/safety-policy.md). Never run the experimental `fix --apply` unless the user asked for repository changes and the exact JSON plan has been reviewed; always pass that file through `--plan`. Review repository-provided safety overrides because they affect eligibility even without `--trust-repo-config`. The accepted-findings ledger is a reviewer's record, not a way to make findings go away: never run `accept` or edit a ledger to silence a failing gate unless the user explicitly asked for those findings to be accepted, and always say which findings a ledger suppressed. A ledger can only withhold deletion candidates, never create them. Never pass `--trust-repo-config` unless the user explicitly authorizes execution of repository-controlled commands. High confidence means eligible for review, not permission to delete.
 
 ## Commands
 
@@ -72,6 +73,9 @@ Analysis is read-only. Before any deletion, read [references/safety-policy.md](r
 repo-gardener scan [path]
 repo-gardener skill-path
 repo-gardener stale [path]
+repo-gardener scan [path] --accepted repo-gardener-accepted.json
+repo-gardener scan [path] --format sarif > repo-gardener.sarif
+repo-gardener accept [path] --output repo-gardener-accepted.json
 repo-gardener structure [path]
 repo-gardener style [path] --baseline HEAD~20
 repo-gardener diff [path] --base HEAD~1
@@ -91,7 +95,7 @@ For integrations that consume JSON, read [references/finding-schema.md](referenc
 
 ## Reporting
 
-Report what was found, why each action is safe or uncertain, what changed, and which validation ran. When no safe deletion exists, say so plainly; do not manufacture cleanup work.
+Report what was found, why each action is safe or uncertain, what changed, and which validation ran. When no safe deletion exists, say so plainly; do not manufacture cleanup work. When `--accepted` is in use, report `metrics.accepted_findings`: how many findings were suppressed and which ledger entries no longer reproduce. For CI integrations, `--format sarif` emits SARIF 2.1.0 with repository-relative paths and stable finding fingerprints.
 
 Structure proposals must surface target collisions, package-init semantics,
 exact module rewrites, relative imports, and `__file__`/resource-path risks.

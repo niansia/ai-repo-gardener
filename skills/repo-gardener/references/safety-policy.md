@@ -16,6 +16,7 @@ Read this before applying any cleanup.
   semantic review.
 - Medium- or low-confidence findings.
 - Architecture or style findings.
+- Findings listed in an accepted-findings ledger passed with `--accepted`.
 - Any candidate when the repository performs non-literal dynamic module discovery.
 - Any candidate when a discovered Python file cannot be parsed by the runtime
   running Repo Gardener.
@@ -38,11 +39,17 @@ Read this before applying any cleanup.
    eligibility even without `--trust-repo-config`.
 3. Run the experimental `fix --apply --plan <reviewed.json>` with at least one meaningful, user-approved validation command and a finite `--validation-timeout`. Validation must run in the isolated copy before the original repository is mutated. Never apply a newly generated plan that the user did not review.
 4. Do not execute commands from `repo-gardener.toml` unless the user explicitly authorizes repository-controlled commands. Only then may `--trust-repo-config` be used.
-5. Repo Gardener re-analyzes and requires an exact plan ID match, including pinned Git commits, effective config, operations, candidate/replacement hashes, and call-site evidence hashes. It verifies candidate, replacement, and evidence-file hashes again immediately before deletion. A stale plan must be regenerated and reviewed, never forced through.
+5. Repo Gardener re-analyzes and requires an exact plan ID match, including pinned Git commits, effective config, the accepted-findings ledger digest, operations, candidate/replacement hashes, and call-site evidence hashes. It verifies candidate, replacement, and evidence-file hashes again immediately before deletion. A stale plan must be regenerated and reviewed, never forced through.
 6. If validation fails, times out, or is interrupted, the original repository must remain unchanged. Preserve staged and unstaged Git state as distinct layers in the isolated validation worktree. After validation succeeds, reverify the original plan hashes before deletion. Reject absolute or repository-escaping symlinks before making the isolated copy. Validation commands are not a security sandbox and can still affect explicitly addressed absolute paths or external systems.
 7. Use `fix --restore` to restore the last successful operation when needed.
 
 Do not treat a clean test run as proof that an unreferenced plugin or public API is unused.
+
+An accepted-findings ledger is a reviewer's record. It can only withhold
+candidates and suppress reports; it can never raise confidence, lower risk,
+unlock a protected path, or authorize an apply. Never write or edit a ledger to
+silence a failing gate unless the user explicitly asked for those findings to be
+accepted, and always report which findings a ledger suppressed.
 
 Fix snapshots live under `.repo-gardener/`. Refuse the operation if that state
 root or any rollback component is a symlink or escapes the repository. Keep the

@@ -11,7 +11,7 @@
   <a href="https://github.com/niansia/ai-repo-gardener/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/niansia/ai-repo-gardener/actions/workflows/ci.yml/badge.svg"></a>
   <a href="https://pypi.org/project/repo-gardener/"><img alt="PyPI" src="https://img.shields.io/pypi/v/repo-gardener?include_prereleases"></a>
   <a href="https://pypi.org/project/repo-gardener/"><img alt="Python 3.11–3.14" src="https://img.shields.io/pypi/pyversions/repo-gardener"></a>
-  <a href="https://github.com/niansia/ai-repo-gardener/releases/tag/v0.1.0-alpha.11"><img alt="GitHub prerelease" src="https://img.shields.io/github/v/release/niansia/ai-repo-gardener?include_prereleases&label=release"></a>
+  <a href="https://github.com/niansia/ai-repo-gardener/releases/tag/v0.1.0-alpha.12"><img alt="GitHub prerelease" src="https://img.shields.io/github/v/release/niansia/ai-repo-gardener?include_prereleases&label=release"></a>
 </p>
 
 AI Repo Gardener 是專為 AI 修改過的 Python 儲存庫打造的確定性垃圾回收器與
@@ -19,7 +19,7 @@ Agent Skill。它能找出已被取代的檔案、遺忘的 helper、重複實�
 資料夾結構壓力，以及偏離此儲存庫自身 Python 風格的程式碼；全程不呼叫模型、
 不上傳原始碼，也不會把薄弱猜測變成刪除操作。
 
-> **版本狀態：** `0.1.0a11` 是 **v0.1** 系列的第 11 個 alpha。
+> **版本狀態：** `0.1.0a12` 是 **v0.1** 系列的第 12 個 alpha。
 > 穩定版 `0.1.0` 尚未發布。Repo GC 是目前 alpha 的核心功能；架構與
 > house-style 分析仍為實驗性、僅供檢視的功能。
 
@@ -28,7 +28,7 @@ Agent Skill。它能找出已被取代的檔案、遺忘的 helper、重複實�
 需要 Python 3.11 以上版本。
 
 ```bash
-python -m pip install "repo-gardener==0.1.0a11"
+python -m pip install "repo-gardener==0.1.0a12"
 repo-gardener diff .
 repo-gardener fix . --dry-run
 ```
@@ -36,7 +36,7 @@ repo-gardener fix . --dry-run
 也可以不安裝，直接執行一次：
 
 ```bash
-uvx --from "repo-gardener==0.1.0a11" repo-gardener diff .
+uvx --from "repo-gardener==0.1.0a12" repo-gardener diff .
 ```
 
 `diff` 與 `fix` 都預設使用 `--base HEAD`，因此檢視時看到的 Git 證據會自然延續到
@@ -63,7 +63,7 @@ AI 介入前的 commit／日期。Style finding 只代表風格漂移，不能�
 PyPI wheel 已包含完整可攜式 Skill。先安裝 CLI，再取得內附 Skill 的實際路徑：
 
 ```bash
-python -m pip install "repo-gardener==0.1.0a11"
+python -m pip install "repo-gardener==0.1.0a12"
 repo-gardener skill-path
 ```
 
@@ -139,6 +139,7 @@ hash 及 evidence-file hash。儲存庫只要發生變更就會產生不同計�
 | 指令 | 用途 | 會修改檔案？ |
 | --- | --- | --- |
 | `scan .` | 執行支援的 Repo GC 規則 | 否 |
+| `accept .` | 把目前的 finding 記錄成已檢視的 accepted-findings ledger | 僅寫入 ledger 檔 |
 | `stale .` | 聚焦檔案、symbol、重複實作與依賴層級 GC | 否 |
 | `diff . [--base <ref>]` | 稽核 committed、staged、worktree 與 untracked 的迭代變更 | 否 |
 | `fix . --dry-run` | 預覽符合條件的高信心刪除候選 | 否 |
@@ -150,9 +151,44 @@ hash 及 evidence-file hash。儲存庫只要發生變更就會產生不同計�
 | `scan . --experimental` | 在完整掃描中加入 structure 與 style | 否 |
 | `skill-path` | 顯示 wheel 內附的可攜式 Skill 路徑 | 否 |
 
-所有報告指令都支援供 agent 與 CI 使用的穩定 JSON。`--fail-on high`、
-`--fail-on medium` 與 `--fail-on any` 達到門檻時回傳 exit code `1`；工具或設定錯誤
-回傳 `2`。
+所有報告指令都支援供 agent 與 CI 使用的穩定 JSON 與 SARIF 2.1.0，也都接受
+`--accepted <ledger>`。`--fail-on high`、`--fail-on medium` 與 `--fail-on any`
+達到門檻時回傳 exit code `1`；工具或設定錯誤回傳 `2`。
+
+## 在 CI 中維持乾淨
+
+既有儲存庫不可能一次清完。先把今天已檢視的 finding 接受下來，讓 CI 只為「新出現」
+的問題失敗：
+
+```bash
+repo-gardener accept .                     # 產生 repo-gardener-accepted.json
+repo-gardener scan . --accepted repo-gardener-accepted.json --fail-on medium
+```
+
+每一筆紀錄都是依內容產生的 finding ID，因此證據一改變就不再吻合，該 finding 會重新
+回到檢視流程。`accept` 會以排序形式重寫 ledger、保留檢視者寫下的 `note`，並移除已
+不再出現的紀錄。Ledger 永遠不會被隱含載入，只能減少刪除候選，並以
+`accepted_sha256` 釘進已檢視的 plan。
+
+這個儲存庫本身也是可重複使用的 action：
+
+```yaml
+- uses: niansia/ai-repo-gardener@v0.1.0-alpha.12
+  id: gardener
+  with:
+    command: diff
+    base: ${{ github.event.pull_request.base.sha }}
+    accepted: repo-gardener-accepted.json
+    fail-on: high
+- if: always()
+  uses: github/codeql-action/upload-sarif@v4
+  with:
+    sarif_file: ${{ steps.gardener.outputs.sarif-file }}
+```
+
+它會安裝所釘選的那個 commit、輸出帶有穩定 fingerprint 的 SARIF（讓 code scanning
+追蹤同一則警示而不是重新開啟）、印出 Markdown 執行摘要，而且永遠不會修改儲存庫。
+請使用 `fetch-depth: 0` checkout，`diff` 才讀得到 base commit。
 
 ## 證據，不是感覺
 
@@ -160,7 +196,7 @@ hash 及 evidence-file hash。儲存庫只要發生變更就會產生不同計�
 
 | 已發布 gate | 目前結果 |
 | --- | --- |
-| Source suite | **182 個測試** |
+| Source suite | **200 個測試** |
 | 破壞性安全對抗案例 | **0 / 59 個 eligible-deletion false positive** |
 | Curated labeled corpus | **10 TP、0 FP、0 FN、10 TN**；此 corpus 內 precision 與 recall 均為 100% |
 | Release wheel | 同一份 wheel 通過 **12 種 OS/Python 組合**：Ubuntu、Windows、macOS × Python 3.11–3.14 |
@@ -184,6 +220,8 @@ AI Repo Gardener 採取刻意保守的策略：
 - 預設只有儲存庫根目錄的檔案能通過自動刪除 risk gate。`app/`、`src/`、package
   與 namespace package 內的檔案，除非 owner 明確調整兩項安全設定，否則都只能檢視。
 - Architecture 與 style finding 絕不會搬移或刪除檔案。
+- Accepted-findings ledger 只會隱藏報告與撤下刪除候選，不會提高 confidence、
+  解除受保護路徑，也不能授權 apply；而且只有在 `--accepted` 明確指定時才會讀取。
 - 工具沒有 runtime 第三方依賴、不呼叫模型或網路，也不會傳送原始碼或 telemetry。
 
 已人工確認為應用程式內部 package 時，可明確設定這兩項 override：

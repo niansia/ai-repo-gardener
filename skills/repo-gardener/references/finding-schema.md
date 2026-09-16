@@ -65,10 +65,61 @@ same reason.
 
 Finding IDs are derived from the rule, normalized path, replacement, and evidence fingerprint. Do not assume IDs survive a schema-version change.
 
-`fix --dry-run --format json` emits reviewed-plan schema version `2`. It
+## Accepted-findings ledger
+
+`accept` writes a JSON ledger of reviewed findings, and `--accepted <file>`
+suppresses them on a later run:
+
+```json
+{
+  "schema_version": 1,
+  "tool": "repo-gardener",
+  "entries": [
+    {
+      "id": "stale-file:0123456789ab",
+      "rule": "stale-file",
+      "path": "parser_v2.py",
+      "note": "kept for the 0.2 migration window"
+    }
+  ]
+}
+```
+
+`entries` is sorted by `id`, which is the finding ID above; `rule`, `path`, and
+`note` are review context. Because the ID includes the evidence fingerprint, a
+ledger suppresses a finding only while its evidence is unchanged, and it must be
+generated with the same command, `--base`, and flags the later run uses.
+
+A ledger is never loaded implicitly. When `--accepted` is supplied, the report
+adds `metrics.accepted_findings` with `source`, `entries`, `suppressed`, and the
+`unmatched` IDs that no current finding reproduces. Suppressed findings are
+removed from `findings`, from the summary counts, and from `--fail-on`. A
+malformed ledger, a repeated ID, or an unexpected `schema_version` is a
+configuration error (exit code `2`), never an empty ledger.
+
+## SARIF output
+
+`--format sarif` emits SARIF 2.1.0 for GitHub code scanning and comparable
+consumers. Paths stay repository-relative, results keep the report's
+deterministic order, and `tool.driver.rules` lists only the rules present in the
+run, so `ruleIndex` always indexes that array. `partialFingerprints` carries
+`repoGardenerFindingId/v1`, the finding ID, so an alert is tracked rather than
+reopened. `level` maps finding `severity` (`warning` to `warning`, anything else
+to `note`); confidence, risk, recommendation, category, replacement, risks, and
+evidence types stay in `properties`. Regions are emitted only where a finding
+carries `definition_line` or `definition_lines` evidence. `runs[0].properties`
+repeats the command, summary, Python file count, parse errors, experimental
+flag, base, and accepted-ledger metrics.
+
+`fix --dry-run --format json` emits reviewed-plan schema version `3`. It
 contains `plan_id`, `base_ref`, `base_sha`, `head_sha`, `config_sha256`,
-automatic-deletion blockers, and deletion operations with candidate,
-replacement, and call-site evidence hashes.
+`accepted_sha256`, automatic-deletion blockers, and deletion operations with
+candidate, replacement, and call-site evidence hashes. `accepted_sha256` is the
+digest of the accepted-findings ledger in effect (the digest of an empty ledger
+when none was supplied), so changing the ledger invalidates a plan that was
+reviewed against a different one. Accepted findings are withheld from the
+operation list; a ledger can only remove operations, never add them. Plans from
+earlier schema versions are rejected rather than upgraded.
 `fix --apply --plan <json>` re-analyzes the repository and requires the current
 plan ID to match exactly before deletion. Candidate, replacement, and call-site
 evidence hashes are checked again at the final mutation boundary. The plan is a

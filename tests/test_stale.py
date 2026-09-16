@@ -337,7 +337,7 @@ def test_repository_parse_error_disables_safe_deletion(
         == 0
     )
     plan = json.loads(capsys.readouterr().out)
-    assert plan["schema_version"] == 2
+    assert plan["schema_version"] == 3
     assert plan["operations"] == []
     assert any(
         "could not be parsed" in blocker

@@ -11,7 +11,7 @@
   <a href="https://github.com/niansia/ai-repo-gardener/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/niansia/ai-repo-gardener/actions/workflows/ci.yml/badge.svg"></a>
   <a href="https://pypi.org/project/repo-gardener/"><img alt="PyPI" src="https://img.shields.io/pypi/v/repo-gardener?include_prereleases"></a>
   <a href="https://pypi.org/project/repo-gardener/"><img alt="Python 3.11–3.14" src="https://img.shields.io/pypi/pyversions/repo-gardener"></a>
-  <a href="https://github.com/niansia/ai-repo-gardener/releases/tag/v0.1.0-alpha.11"><img alt="GitHub prerelease" src="https://img.shields.io/github/v/release/niansia/ai-repo-gardener?include_prereleases&label=release"></a>
+  <a href="https://github.com/niansia/ai-repo-gardener/releases/tag/v0.1.0-alpha.12"><img alt="GitHub prerelease" src="https://img.shields.io/github/v/release/niansia/ai-repo-gardener?include_prereleases&label=release"></a>
 </p>
 
 AI Repo Gardener is a deterministic garbage collector and review Skill for
@@ -20,7 +20,7 @@ duplicate implementations, dependency leftovers, folder pressure, and code
 that drifts away from the repository's own Python style—without calling a
 model, uploading source, or turning weak guesses into deletions.
 
-> **Release status:** `0.1.0a11` is the eleventh alpha in the **v0.1** line.
+> **Release status:** `0.1.0a12` is the twelfth alpha in the **v0.1** line.
 > Stable `0.1.0` has not been released yet. Repo GC is the core alpha feature;
 > architecture and house-style analysis are experimental and review-only.
 
@@ -29,7 +29,7 @@ model, uploading source, or turning weak guesses into deletions.
 Python 3.11+ is required.
 
 ```bash
-python -m pip install "repo-gardener==0.1.0a11"
+python -m pip install "repo-gardener==0.1.0a12"
 repo-gardener diff .
 repo-gardener fix . --dry-run
 ```
@@ -37,7 +37,7 @@ repo-gardener fix . --dry-run
 Or run it once without installing:
 
 ```bash
-uvx --from "repo-gardener==0.1.0a11" repo-gardener diff .
+uvx --from "repo-gardener==0.1.0a12" repo-gardener diff .
 ```
 
 `diff` and `fix` both default to `--base HEAD`, so the evidence shown in the
@@ -67,7 +67,7 @@ The PyPI wheel contains the complete portable Skill. Install the CLI first,
 then locate its bundled copy:
 
 ```bash
-python -m pip install "repo-gardener==0.1.0a11"
+python -m pip install "repo-gardener==0.1.0a12"
 repo-gardener skill-path
 ```
 
@@ -146,6 +146,7 @@ changed repository produces a different plan and is refused.
 | Command | Purpose | Mutates files? |
 | --- | --- | --- |
 | `scan .` | Run the supported Repo GC rules | No |
+| `accept .` | Record the current findings as a reviewed accepted-findings ledger | Ledger file only |
 | `stale .` | Focus on file-, symbol-, duplicate-, and dependency-level GC | No |
 | `diff . [--base <ref>]` | Audit committed, staged, worktree, and untracked iteration changes | No |
 | `fix . --dry-run` | Preview eligible high-confidence deletions | No |
@@ -157,9 +158,48 @@ changed repository produces a different plan and is refused.
 | `scan . --experimental` | Add structure and style to the full scan | No |
 | `skill-path` | Print the portable Skill bundled in the wheel | No |
 
-All reporting commands support stable JSON for agents and CI. `--fail-on high`,
-`--fail-on medium`, and `--fail-on any` return exit code `1` when the threshold
-is reached; tool and configuration errors return `2`.
+All reporting commands support stable JSON and SARIF 2.1.0 for agents and CI,
+and all of them accept `--accepted <ledger>`. `--fail-on high`, `--fail-on
+medium`, and `--fail-on any` return exit code `1` when the threshold is reached;
+tool and configuration errors return `2`.
+
+## Keep it clean in CI
+
+A repository that already has leftovers cannot be cleared in one pass. Accept
+today's reviewed findings once, then let CI fail only on what is new:
+
+```bash
+repo-gardener accept .                     # writes repo-gardener-accepted.json
+repo-gardener scan . --accepted repo-gardener-accepted.json --fail-on medium
+```
+
+Each entry is a content-addressed finding ID, so it stops matching the moment
+the evidence changes and the finding returns for review. `accept` rewrites the
+ledger in sorted order, carries reviewer `note` fields forward, and drops
+entries that no longer reproduce. A ledger is never loaded implicitly, can only
+take deletion candidates away, and is pinned into the reviewed plan as
+`accepted_sha256`.
+
+This repository is also a reusable action:
+
+```yaml
+- uses: niansia/ai-repo-gardener@v0.1.0-alpha.12
+  id: gardener
+  with:
+    command: diff
+    base: ${{ github.event.pull_request.base.sha }}
+    accepted: repo-gardener-accepted.json
+    fail-on: high
+- if: always()
+  uses: github/codeql-action/upload-sarif@v4
+  with:
+    sarif_file: ${{ steps.gardener.outputs.sarif-file }}
+```
+
+It installs the exact commit it is pinned to, writes SARIF with stable
+fingerprints so code scanning tracks one alert instead of reopening it, prints a
+Markdown job summary, and never mutates the repository. Check out with
+`fetch-depth: 0` so `diff` can reach its base commit.
 
 ## Evidence, not vibes
 
@@ -168,7 +208,7 @@ accuracy claims.
 
 | Published gate | Current result |
 | --- | --- |
-| Source suite | **182 tests** |
+| Source suite | **200 tests** |
 | Destructive-safety variants | **0 / 59 eligible-deletion false positives** |
 | Curated labeled corpus | **10 TP, 0 FP, 0 FN, 10 TN**; precision and recall 100% in that corpus |
 | Release wheel | The same wheel tested on **12 OS/Python combinations**: Ubuntu, Windows, macOS × Python 3.11–3.14 |
@@ -195,6 +235,9 @@ AI Repo Gardener is intentionally conservative:
   review-only unless the repository owner explicitly changes both relevant
   safety settings.
 - Architecture and style findings never move or delete files.
+- An accepted-findings ledger only suppresses reports and withholds deletion
+  candidates. It never raises confidence, unlocks a protected path, or
+  authorizes an apply, and it is read only when `--accepted` names it.
 - The tool has zero runtime dependencies, makes no model or network call, and
   sends no source code or telemetry.
 

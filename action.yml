@@ -1,0 +1,151 @@
+name: AI Repo Gardener
+description: >-
+  Evidence-backed garbage collection, architecture pressure, and house-style
+  drift analysis for AI-edited Python repositories. Never mutates the repository.
+author: AI Repo Gardener contributors
+
+branding:
+  icon: scissors
+  color: green
+
+inputs:
+  path:
+    description: Repository path to analyze.
+    required: false
+    default: "."
+  command:
+    description: "Analysis command: scan, stale, diff, structure, or style."
+    required: false
+    default: scan
+  base:
+    description: Git ref that predates the agent iteration. Used by diff.
+    required: false
+    default: ""
+  confidence:
+    description: "Reported confidence floor: high, medium, or all."
+    required: false
+    default: medium
+  fail-on:
+    description: >-
+      Fail the step when a finding reaches this tier (high, medium, any).
+      Leave empty to report without failing.
+    required: false
+    default: ""
+  accepted:
+    description: >-
+      Accepted-findings ledger written by `repo-gardener accept`. Listed
+      findings are suppressed and cannot reach the fail-on gate.
+    required: false
+    default: ""
+  config:
+    description: Explicit repo-gardener.toml path.
+    required: false
+    default: ""
+  experimental:
+    description: Also run review-only structure and style analysis (scan, diff).
+    required: false
+    default: "false"
+  style-baseline:
+    description: Pre-AI style baseline commit or date.
+    required: false
+    default: ""
+  sarif-file:
+    description: SARIF 2.1.0 output path. Set to an empty string to disable it.
+    required: false
+    default: repo-gardener.sarif
+  version:
+    description: >-
+      PyPI version to install instead of the pinned action source, for example
+      0.1.0a12. Empty installs the exact commit this action was pinned to.
+    required: false
+    default: ""
+
+outputs:
+  sarif-file:
+    description: Path of the written SARIF file, or empty when disabled.
+    value: ${{ steps.gardener.outputs.sarif-file }}
+  findings:
+    description: Number of findings reported at the selected confidence floor.
+    value: ${{ steps.gardener.outputs.findings }}
+  exit-code:
+    description: "repo-gardener exit code: 0 clean, 1 gate reached, 2 tool error."
+    value: ${{ steps.gardener.outputs.exit-code }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install repo-gardener
+      shell: bash
+      env:
+        GARDENER_VERSION: ${{ inputs.version }}
+        GARDENER_SOURCE: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        if [ -n "$GARDENER_VERSION" ]; then
+          python -m pip install --disable-pip-version-check \
+            "repo-gardener==$GARDENER_VERSION"
+        else
+          python -m pip install --disable-pip-version-check "$GARDENER_SOURCE"
+        fi
+        repo-gardener --version
+
+    - name: Run repo-gardener
+      id: gardener
+      shell: bash
+      env:
+        GARDENER_PATH: ${{ inputs.path }}
+        GARDENER_COMMAND: ${{ inputs.command }}
+        GARDENER_BASE: ${{ inputs.base }}
+        GARDENER_CONFIDENCE: ${{ inputs.confidence }}
+        GARDENER_FAIL_ON: ${{ inputs.fail-on }}
+        GARDENER_ACCEPTED: ${{ inputs.accepted }}
+        GARDENER_CONFIG: ${{ inputs.config }}
+        GARDENER_EXPERIMENTAL: ${{ inputs.experimental }}
+        GARDENER_STYLE_BASELINE: ${{ inputs.style-baseline }}
+        GARDENER_SARIF: ${{ inputs.sarif-file }}
+      run: |
+        set -uo pipefail
+        arguments=("$GARDENER_COMMAND" "$GARDENER_PATH")
+        arguments+=("--confidence" "$GARDENER_CONFIDENCE")
+        if [ -n "$GARDENER_BASE" ]; then
+          arguments+=("--base" "$GARDENER_BASE")
+        fi
+        if [ -n "$GARDENER_ACCEPTED" ]; then
+          arguments+=("--accepted" "$GARDENER_ACCEPTED")
+        fi
+        if [ -n "$GARDENER_CONFIG" ]; then
+          arguments+=("--config" "$GARDENER_CONFIG")
+        fi
+        if [ -n "$GARDENER_STYLE_BASELINE" ]; then
+          arguments+=("--baseline" "$GARDENER_STYLE_BASELINE")
+        fi
+        if [ "$GARDENER_EXPERIMENTAL" = "true" ]; then
+          arguments+=("--experimental")
+        fi
+        if [ -n "$GARDENER_FAIL_ON" ]; then
+          arguments+=("--fail-on" "$GARDENER_FAIL_ON")
+        fi
+        status=0
+        findings=""
+        if [ -n "$GARDENER_SARIF" ]; then
+          repo-gardener "${arguments[@]}" --format sarif > "$GARDENER_SARIF" || status=$?
+          if [ "$status" -le 1 ]; then
+            python -m repo_gardener.sarif_summary "$GARDENER_SARIF"
+            findings=$(python -c "import json,sys; print(len(json.load(open(sys.argv[1], encoding='utf-8'))['runs'][0]['results']))" "$GARDENER_SARIF")
+          else
+            cat "$GARDENER_SARIF" >&2 || true
+          fi
+        else
+          repo-gardener "${arguments[@]}" || status=$?
+        fi
+        {
+          echo "sarif-file=$GARDENER_SARIF"
+          echo "findings=$findings"
+          echo "exit-code=$status"
+        } >> "$GITHUB_OUTPUT"
+        if [ "$status" -eq 2 ]; then
+          echo "::error::repo-gardener reported a tool or configuration error."
+        elif [ "$status" -eq 1 ]; then
+          echo "::error::repo-gardener findings reached the --fail-on $GARDENER_FAIL_ON gate."
+        fi
+        exit "$status"
