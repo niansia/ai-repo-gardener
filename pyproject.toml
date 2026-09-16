@@ -35,7 +35,7 @@ Issues = "https://github.com/niansia/ai-repo-gardener/issues"
 dev = [
   "pillow==12.2.0",
   "pytest==8.4.2",
-  "ruff==0.16.5",
+  "ruff==0.16.7",
 ]
 
 [project.scripts]
