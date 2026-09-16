@@ -9,7 +9,8 @@ Repo Gardener optimizes for explainability and false-positive control. A new rul
 3. Keep analysis deterministic and local. An optional model may review ambiguity later, but it cannot be the source of deletion confidence.
 4. Keep architecture and style actions proposal-only.
 5. Record user-visible behavior in [CHANGELOG.md](CHANGELOG.md) under the
-   unreleased heading.
+   unreleased heading, adding one above the most recent released version when
+   the previous entry has already shipped.
 6. Run:
 
    ```bash

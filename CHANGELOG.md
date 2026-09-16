@@ -5,7 +5,7 @@ All notable changes to AI Repo Gardener are recorded here. Versions follow
 `vX.Y.Z-alpha.N`. Alpha releases may change analysis output, and any finding
 schema change is called out explicitly.
 
-## 0.1.0a12 — unreleased
+## 0.1.0a12 — 2026-09-16
 
 Continuous maintenance: adopt the tool on a repository that already has
 leftovers, gate CI on new findings only, and read results where review happens.
